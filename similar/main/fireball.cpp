@@ -1590,7 +1590,7 @@ unsigned do_exploding_wall_frame(const d_robot_info_array &Robot_info, wall &w1)
 	auto &LevelSharedVertexState{LevelSharedSegmentState.get_vertex_state()};
 	auto &Vertices{LevelSharedVertexState.get_vertices()};
 	auto &WallAnims{GameSharedState.WallAnims};
-	assert(w1.flags & wall_flag::exploding);
+	assert(+(w1.flags & wall_flag::exploding));
 	fix w1_explode_time_elapsed{w1.explode_time_elapsed};
 	const fix oldfrac{fixdiv(w1_explode_time_elapsed, EXPL_WALL_TIME)};
 

@@ -27,6 +27,9 @@
 #include "joy.h"
 #include "args.h"
 #include "partial_range.h"
+#ifdef __ANDROID__
+#include "touch.h"
+#endif
 
 namespace dcx {
 
@@ -168,6 +171,13 @@ void event_poll_state::process_event_batch(const std::ranges::subrange<const SDL
 				break;
 			case SDL_JOYBALLMOTION:
 				continue;
+#ifdef __ANDROID__
+			case SDL_FINGERDOWN:
+			case SDL_FINGERMOTION:
+			case SDL_FINGERUP:
+				touch_overlay_handle_event(event);
+				continue;
+#endif
 			case SDL_QUIT: {
 				result = call_default_handler(d_event{event_type::quit});
 				break;
@@ -264,6 +274,9 @@ window_event_result event_process(void)
 		wind = window_get_next(*wind);
 	}
 
+#ifdef __ANDROID__
+	touch_overlay_draw();
+#endif
 	gr_flip();
 
 	return highest_result;

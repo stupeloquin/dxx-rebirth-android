@@ -1487,7 +1487,7 @@ static imobjptridx_t Laser_player_fire_spread_delay(const d_robot_info_array &Ro
 		}
 		else // Some other player shot the homing thing
 		{
-			Assert(Game_mode & GM_MULTI);
+			Assert(+(Game_mode & GM_MULTI));
 			objnum->ctype.laser_info.track_goal = Network_laser_track;
 		}
 	}

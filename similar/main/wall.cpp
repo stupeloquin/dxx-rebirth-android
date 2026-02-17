@@ -971,7 +971,7 @@ static bool do_door_close(active_door &d)
 #if DXX_BUILD_DESCENT == 1
 		//if here, must be auto door
 //don't assert here, because now we have triggers to close non-auto doors
-		assert(wp.flags & wall_flag::door_auto);
+		assert(+(wp.flags & wall_flag::door_auto));
 #endif
 
 		// Otherwise, close it.

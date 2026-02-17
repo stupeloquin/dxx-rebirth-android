@@ -1,0 +1,43 @@
+FROM dxx-android-builder
+
+# Install emulator and system image
+RUN yes | sdkmanager --install \
+    "emulator" \
+    "system-images;android-34;google_apis;x86_64" \
+    "platform-tools"
+
+# Create AVD
+RUN echo "no" | avdmanager create avd \
+    --name "dxx_test" \
+    --package "system-images;android-34;google_apis;x86_64" \
+    --device "pixel_6" \
+    --force
+
+# Install additional tools needed for headless testing
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    libpulse0 \
+    libgl1 \
+    libx11-6 \
+    libxext6 \
+    libxrender1 \
+    libxi6 \
+    libxcursor1 \
+    libxrandr2 \
+    libxfixes3 \
+    libxinerama1 \
+    libxcomposite1 \
+    libxdamage1 \
+    libxtst6 \
+    libnss3 \
+    libatk1.0-0 \
+    libatk-bridge2.0-0 \
+    libcups2 \
+    libdrm2 \
+    libgbm1 \
+    libpango-1.0-0 \
+    libcairo2 \
+    libasound2t64 \
+    && rm -rf /var/lib/apt/lists/*
+
+ENV ANDROID_HOME=/opt/android-sdk
+ENV PATH="${ANDROID_HOME}/emulator:${ANDROID_HOME}/platform-tools:${PATH}"

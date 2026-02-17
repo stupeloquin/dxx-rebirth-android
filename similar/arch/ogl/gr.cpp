@@ -54,7 +54,7 @@
 #if defined(__APPLE__) && defined(__MACH__)
 #include <OpenGL/glu.h>
 #else
-#if DXX_USE_OGLES
+#if DXX_USE_OGLES && SDL_MAJOR_VERSION == 1
 #include <EGL/egl.h>
 #include <X11/Xlib.h>
 #include <X11/Xutil.h>

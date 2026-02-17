@@ -361,6 +361,9 @@ void joy_init()
 		con_printf(CON_NORMAL, "sdl-joystick %d: %s", i, SDL_JoystickName(i));
 #else
 		con_printf(CON_NORMAL, "sdl-joystick %d: %s", i, SDL_JoystickName(handle));
+		// Open as Game Controller for standardized mappings if recognized
+		if (SDL_IsGameController(i))
+			SDL_GameControllerOpen(i);
 #endif
 		if (handle)
 		{

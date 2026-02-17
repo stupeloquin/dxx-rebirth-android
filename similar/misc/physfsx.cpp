@@ -26,6 +26,9 @@
 #include "strutil.h"
 #include "ignorecase.h"
 #include "physfs_list.h"
+#ifdef __ANDROID__
+#include <SDL.h>
+#endif
 
 #include "compiler-range_for.h"
 #include "compiler-poison.h"
@@ -144,7 +147,20 @@ static void setup_final_fallback_write_directory(const char *const base_dir)
 {
 	if (!PHYSFS_getWriteDir())
 	{
+#ifdef __ANDROID__
+		// On Android, base_dir is the APK path which isn't writable.
+		// Use PHYSFS_getPrefDir which returns Context.getFilesDir().
+		const char *pref = PHYSFS_getPrefDir("dxx-rebirth", "d1x-rebirth");
+		if (pref)
+			PHYSFS_setWriteDir(pref);
+		// If that failed, try the well-known app data path
+		if (!PHYSFS_getWriteDir())
+			PHYSFS_setWriteDir("/data/data/com.dxxrebirth.d1x/files");
+		if (!PHYSFS_getWriteDir())
+			PHYSFS_setWriteDir("/");
+#else
 		PHYSFS_setWriteDir(base_dir);
+#endif
 		auto writedir{PHYSFS_getWriteDir()};
 		if (!writedir)
 			Error("can't set write dir: %s\n", PHYSFS_getLastError());
@@ -178,12 +194,45 @@ static void setup_osx_resource_path()
 // The user directory is searched first.
 bool PHYSFSX_init(int argc, char *argv[])
 {
+#ifdef __ANDROID__
+	// On Android, PHYSFS_init expects a PHYSFS_AndroidInit* (cast to
+	// const char*) containing JNI env and Context pointers.
+	// SDL_AndroidGetJNIEnv/Activity work before SDL_Init because the
+	// JNI env is set up when SDLActivity loads the native library.
+	{
+		PHYSFS_AndroidInit ainit;
+		ainit.jnienv = SDL_AndroidGetJNIEnv();
+		ainit.context = SDL_AndroidGetActivity();
+		if (!PHYSFS_init(reinterpret_cast<const char *>(&ainit)))
+			Error("Failed to init PhysFS: %s", PHYSFS_getLastError());
+	}
+#else
 	if (!PHYSFS_init(argv[0]))
 		Error("Failed to init PhysFS: %s", PHYSFS_getLastError());
+#endif
 	PHYSFS_permitSymbolicLinks(1);
 	const auto base_dir{PHYSFS_getBaseDir()};
 #if (defined(__APPLE__) && defined(__MACH__))	// others?
 	chdir(base_dir);	// make sure relative hogdir paths work
+#endif
+
+#ifdef __ANDROID__
+	// On Android, use the PhysFS pref dir (from Context.getFilesDir())
+	// as the write directory.  This was captured during PHYSFS_init via
+	// the PHYSFS_AndroidInit JNI context.
+	{
+		const char *pref_dir = PHYSFS_getPrefDir("dxx-rebirth", "d1x-rebirth");
+		if (pref_dir)
+		{
+			PHYSFS_setWriteDir(pref_dir);
+			PHYSFS_mount(pref_dir, nullptr, 1);
+			con_printf(CON_DEBUG, "PHYSFS: Android pref dir (write): %s", pref_dir);
+		}
+		// Mount external storage where users push game data files via adb.
+		// This path is /sdcard/Android/data/<pkg>/files/ on most devices.
+		PHYSFS_mount("/sdcard/Android/data/com.dxxrebirth.d1x/files", nullptr, 1);
+		PHYSFS_mount("/storage/emulated/0/Android/data/com.dxxrebirth.d1x/files", nullptr, 1);
+	}
 #endif
 
 #if DXX_ENABLE_ENVIRONMENT_VARIABLE_DXX_REBIRTH_HOME

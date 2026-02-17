@@ -13,8 +13,11 @@
 
 #include <cstdint>
 
+#include "dxxsconf.h"
 #if defined(__APPLE__) && defined(__MACH__)
 #include <OpenGL/gl.h>
+#elif DXX_USE_OGLES
+#include <GLES/gl.h>
 #else
 #include <GL/gl.h>
 #endif

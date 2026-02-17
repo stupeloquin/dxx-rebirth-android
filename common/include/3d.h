@@ -39,6 +39,8 @@ COPYRIGHT 1993-1998 PARALLAX SOFTWARE CORPORATION.  ALL RIGHTS RESERVED.
 #if DXX_USE_OGL
 #if defined(__APPLE__) && defined(__MACH__)
 #include <OpenGL/gl.h>
+#elif DXX_USE_OGLES
+#include <GLES/gl.h>
 #else
 #include <GL/gl.h>
 #endif

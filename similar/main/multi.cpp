@@ -3493,7 +3493,7 @@ void multi_prep_level_player(void)
 	// since the resulting checksum with depend on the value of Player_num
 	// at the time this is called.
 
-	Assert(Game_mode & GM_MULTI);
+	Assert(+(Game_mode & GM_MULTI));
 
 	Assert(NumNetPlayerPositions > 0);
 
