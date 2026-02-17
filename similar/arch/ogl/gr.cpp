@@ -64,6 +64,9 @@
 
 #include "ogl_sync.h"
 #include <memory>
+#ifdef __ANDROID__
+#include "touch.h"
+#endif
 
 using std::min;
 using std::max;
@@ -741,6 +744,9 @@ int gr_set_mode(screen_mode mode)
 
 	OGL_VIEWPORT(0,0,w,h);
 	ogl_init_state();
+#ifdef __ANDROID__
+	touch_overlay_init(w, h);
+#endif
 	gamefont_choose_game_font(w,h);
 	gr_remap_color_fonts();
 

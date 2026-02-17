@@ -8,7 +8,7 @@
 /*
  * Touch overlay for Android - provides virtual controls when no gamepad
  * is connected.  Renders translucent touch zones and converts multi-touch
- * events into synthetic joystick/keyboard SDL events.
+ * events into synthetic keyboard SDL events.
  */
 
 #ifdef __ANDROID__
@@ -29,13 +29,15 @@ struct touch_zone {
 	SDL_FingerID finger_id;
 };
 
-// Virtual joystick state
+// Virtual joystick state - sends directional keyboard events
 static struct {
 	float center_x, center_y;  // normalized
 	float radius;              // normalized
 	float dx, dy;              // deflection -1..1
 	bool active;
 	SDL_FingerID finger_id;
+	// Track which directional keys are currently held
+	bool key_left, key_right, key_up, key_down;
 } v_stick;
 
 // Button zones
@@ -77,14 +79,61 @@ static void send_key_event(SDL_Scancode scancode, bool pressed)
 	SDL_PushEvent(&ev);
 }
 
-static void send_joy_axis(Uint8 axis, Sint16 value)
+// Update directional keys from virtual stick deflection
+static void update_stick_keys(float dx, float dy)
 {
-	SDL_Event ev{};
-	ev.type = SDL_JOYAXISMOTION;
-	ev.jaxis.which = 0;
-	ev.jaxis.axis = axis;
-	ev.jaxis.value = value;
-	SDL_PushEvent(&ev);
+	constexpr float threshold = 0.3f;
+
+	bool want_left = dx < -threshold;
+	bool want_right = dx > threshold;
+	bool want_up = dy < -threshold;
+	bool want_down = dy > threshold;
+
+	if (want_left != v_stick.key_left)
+	{
+		v_stick.key_left = want_left;
+		send_key_event(SDL_SCANCODE_LEFT, want_left);
+	}
+	if (want_right != v_stick.key_right)
+	{
+		v_stick.key_right = want_right;
+		send_key_event(SDL_SCANCODE_RIGHT, want_right);
+	}
+	if (want_up != v_stick.key_up)
+	{
+		v_stick.key_up = want_up;
+		send_key_event(SDL_SCANCODE_UP, want_up);
+	}
+	if (want_down != v_stick.key_down)
+	{
+		v_stick.key_down = want_down;
+		send_key_event(SDL_SCANCODE_DOWN, want_down);
+	}
+}
+
+// Release all held directional keys
+static void release_all_stick_keys()
+{
+	if (v_stick.key_left)
+	{
+		v_stick.key_left = false;
+		send_key_event(SDL_SCANCODE_LEFT, false);
+	}
+	if (v_stick.key_right)
+	{
+		v_stick.key_right = false;
+		send_key_event(SDL_SCANCODE_RIGHT, false);
+	}
+	if (v_stick.key_up)
+	{
+		v_stick.key_up = false;
+		send_key_event(SDL_SCANCODE_UP, false);
+	}
+	if (v_stick.key_down)
+	{
+		v_stick.key_down = false;
+		send_key_event(SDL_SCANCODE_DOWN, false);
+	}
 }
 
 static void draw_circle(float cx, float cy, float r, int segments, float alpha)
@@ -132,6 +181,7 @@ void touch_overlay_init(int w, int h)
 	v_stick.radius = 0.12f;
 	v_stick.dx = v_stick.dy = 0.0f;
 	v_stick.active = false;
+	v_stick.key_left = v_stick.key_right = v_stick.key_up = v_stick.key_down = false;
 
 	// Buttons: right side of screen
 	// Fire primary - large button, lower right
@@ -158,6 +208,9 @@ void touch_overlay_draw()
 		return;
 
 	// Save GL state
+	GLboolean tex2d_was_enabled;
+	glGetBooleanv(GL_TEXTURE_2D, &tex2d_was_enabled);
+
 	glPushMatrix();
 	glMatrixMode(GL_PROJECTION);
 	glPushMatrix();
@@ -184,11 +237,6 @@ void touch_overlay_draw()
 	}
 
 	// Draw buttons
-	static constexpr std::array<const char*, BTN_COUNT> btn_labels = {{
-		"FIRE", "MISS", "FLR", "BMB", "AFT", "MAP", "ESC"
-	}};
-	(void)btn_labels;  // labels drawn by text overlay if available
-
 	for (int i = 0; i < BTN_COUNT; i++)
 	{
 		auto &b = buttons[i];
@@ -198,10 +246,12 @@ void touch_overlay_draw()
 		draw_filled_rect(b.x, b.y, b.w, b.h, r, g, 0.7f, a);
 	}
 
+	// Restore GL state
 	glDisable(GL_BLEND);
 	glEnable(GL_DEPTH_TEST);
+	if (tex2d_was_enabled)
+		glEnable(GL_TEXTURE_2D);
 
-	// Restore GL state
 	glMatrixMode(GL_PROJECTION);
 	glPopMatrix();
 	glMatrixMode(GL_MODELVIEW);
@@ -242,9 +292,8 @@ int touch_overlay_handle_event(const SDL_Event &event)
 				v_stick.active = true;
 				v_stick.finger_id = fid;
 
-				// Send as joystick axes: axis 0 = turn (X), axis 1 = pitch (Y)
-				send_joy_axis(0, static_cast<Sint16>(ddx * 32767));
-				send_joy_axis(1, static_cast<Sint16>(ddy * 32767));
+				// Send as directional keyboard events (digital movement)
+				update_stick_keys(ddx, ddy);
 				return 1;
 			}
 
@@ -276,8 +325,7 @@ int touch_overlay_handle_event(const SDL_Event &event)
 			{
 				v_stick.active = false;
 				v_stick.dx = v_stick.dy = 0.0f;
-				send_joy_axis(0, 0);
-				send_joy_axis(1, 0);
+				release_all_stick_keys();
 				return 1;
 			}
 
