@@ -6,14 +6,18 @@
  */
 
 /*
- * Touch overlay for Android - provides dual virtual sticks and action
- * buttons when no gamepad is connected.  Renders translucent touch zones
- * using GLES 1.x and converts multi-touch events into synthetic keyboard
- * SDL events that map to the default keyboard bindings.
+ * Touch overlay for Android — floating dual thumbsticks with fire zone
+ * and textured action buttons.
  *
- * Left stick  → W/S/A/D (accelerate, reverse, slide left/right)
- * Right stick → Arrow keys (pitch up/down, turn left/right)
- * Buttons     → Ctrl, Space, F, B, Q, E, Tab, Escape
+ * Left half of screen  → floating movement stick (W/A/S/D)
+ * Right half of screen → floating look stick (arrow keys)
+ *   Upper-right zone   → also fires primary weapon (Ctrl) while looking
+ *   Lower-left zone    → look only, no fire
+ *
+ * Buttons along top edge → Space, F, B, Q, E, Tab, Esc, Enter
+ *
+ * Sticks appear where the thumb touches and disappear on release.
+ * Fire zone is separated by a diagonal: 2*fx - fy > 1.0
  */
 
 #ifdef __ANDROID__
@@ -27,6 +31,15 @@
 #include <array>
 #include "touch.h"
 
+// stb_image for PNG texture loading
+#define STB_IMAGE_IMPLEMENTATION
+#define STBI_ONLY_PNG
+#define STBI_NO_STDIO
+#define STBI_NO_HDR
+#define STBI_NO_LINEAR
+#include "stb_image.h"
+#include "touch_icons.h"
+
 namespace dcx {
 
 namespace {
@@ -39,27 +52,24 @@ struct touch_zone {
 
 // Virtual stick with 4-directional keyboard output
 struct virtual_stick {
-	float center_x, center_y;  // normalized
-	float radius;              // normalized
+	float center_x, center_y;  // set dynamically on finger-down
+	float radius;              // normalized (Y units)
 	float dx, dy;              // deflection -1..1
 	bool active;
+	bool firing;               // right stick only: is Ctrl held?
 	SDL_FingerID finger_id;
-	// Track which directional keys are currently held
 	bool key_up, key_down, key_left, key_right;
-	// Scancodes for each direction
 	SDL_Scancode sc_up, sc_down, sc_left, sc_right;
 };
 
-static virtual_stick left_stick, right_stick, fire_stick;
+static virtual_stick left_stick, right_stick;
 
-// Aspect ratio correction: in normalized 0..1 coords, a circle needs
-// its X radius scaled by (height/width) to appear round on screen.
-static float aspect_ratio;  // width / height
+// Aspect ratio: width / height — used to make circles round
+static float aspect_ratio;
 
-// Button zones
+// Button enum — no BTN_FIRE_PRIMARY, fire is handled by the right stick zone
 enum {
-	BTN_FIRE_PRIMARY = 0,
-	BTN_FIRE_SECONDARY,
+	BTN_FIRE_SECONDARY = 0,
 	BTN_FLARE,
 	BTN_BOMB,
 	BTN_BANK_LEFT,
@@ -73,13 +83,11 @@ enum {
 static std::array<touch_zone, BTN_COUNT> buttons;
 static bool overlay_enabled = true;
 static bool overlay_initialized = false;
-static bool controls_visible = true;  // false = only toggle button visible
-static touch_zone toggle_button;      // always-visible hide/show button
+static bool controls_visible = true;
+static touch_zone toggle_button;
 static int screen_width, screen_height;
 
-// Map virtual buttons to SDL key scancodes matching default keyboard bindings
 static constexpr std::array<SDL_Scancode, BTN_COUNT> button_scancodes = {{
-	SDL_SCANCODE_LCTRL,    // fire primary
 	SDL_SCANCODE_SPACE,    // fire secondary
 	SDL_SCANCODE_F,        // flare
 	SDL_SCANCODE_B,        // bomb
@@ -90,10 +98,8 @@ static constexpr std::array<SDL_Scancode, BTN_COUNT> button_scancodes = {{
 	SDL_SCANCODE_RETURN,   // accept/enter
 }};
 
-// Button colors: {r, g, b}
 struct btn_color { float r, g, b; };
 static constexpr std::array<btn_color, BTN_COUNT> button_colors = {{
-	{1.0f, 0.3f, 0.2f},   // fire primary - red
 	{1.0f, 0.6f, 0.2f},   // fire secondary - orange
 	{1.0f, 1.0f, 0.3f},   // flare - yellow
 	{1.0f, 0.8f, 0.0f},   // bomb - gold
@@ -103,6 +109,15 @@ static constexpr std::array<btn_color, BTN_COUNT> button_colors = {{
 	{0.7f, 0.7f, 0.7f},   // escape - gray
 	{0.4f, 1.0f, 0.4f},   // accept - bright green
 }};
+
+#if !DXX_USE_VULKAN
+// Button icon textures (loaded from touch_icons.h PNGs)
+static std::array<GLuint, BTN_COUNT> button_textures{};
+// Track whether textures are real (>1x1) or placeholders
+static std::array<bool, BTN_COUNT> button_texture_is_placeholder{};
+#endif
+
+// --- Key event injection ---
 
 static void send_key_event(SDL_Scancode scancode, bool pressed)
 {
@@ -115,95 +130,127 @@ static void send_key_event(SDL_Scancode scancode, bool pressed)
 	SDL_PushEvent(&ev);
 }
 
-// Update directional keys from a virtual stick's deflection
+// --- Stick helpers ---
+
 static void update_stick_keys(virtual_stick &stick, float dx, float dy)
 {
 	constexpr float threshold = 0.3f;
-
 	bool want_left = dx < -threshold;
 	bool want_right = dx > threshold;
 	bool want_up = dy < -threshold;
 	bool want_down = dy > threshold;
 
-	if (want_left != stick.key_left)
-	{
-		stick.key_left = want_left;
-		send_key_event(stick.sc_left, want_left);
-	}
-	if (want_right != stick.key_right)
-	{
-		stick.key_right = want_right;
-		send_key_event(stick.sc_right, want_right);
-	}
-	if (want_up != stick.key_up)
-	{
-		stick.key_up = want_up;
-		send_key_event(stick.sc_up, want_up);
-	}
-	if (want_down != stick.key_down)
-	{
-		stick.key_down = want_down;
-		send_key_event(stick.sc_down, want_down);
-	}
+	if (want_left != stick.key_left) { stick.key_left = want_left; send_key_event(stick.sc_left, want_left); }
+	if (want_right != stick.key_right) { stick.key_right = want_right; send_key_event(stick.sc_right, want_right); }
+	if (want_up != stick.key_up) { stick.key_up = want_up; send_key_event(stick.sc_up, want_up); }
+	if (want_down != stick.key_down) { stick.key_down = want_down; send_key_event(stick.sc_down, want_down); }
 }
 
-// Release all held directional keys for a stick
 static void release_all_stick_keys(virtual_stick &stick)
 {
-	if (stick.key_left)
-	{
-		stick.key_left = false;
-		send_key_event(stick.sc_left, false);
-	}
-	if (stick.key_right)
-	{
-		stick.key_right = false;
-		send_key_event(stick.sc_right, false);
-	}
-	if (stick.key_up)
-	{
-		stick.key_up = false;
-		send_key_event(stick.sc_up, false);
-	}
-	if (stick.key_down)
-	{
-		stick.key_down = false;
-		send_key_event(stick.sc_down, false);
-	}
+	if (stick.key_left) { stick.key_left = false; send_key_event(stick.sc_left, false); }
+	if (stick.key_right) { stick.key_right = false; send_key_event(stick.sc_right, false); }
+	if (stick.key_up) { stick.key_up = false; send_key_event(stick.sc_up, false); }
+	if (stick.key_down) { stick.key_down = false; send_key_event(stick.sc_down, false); }
 }
 
-// Process a touch event against a virtual stick
-// Returns true if the touch was consumed by this stick
-static bool process_stick_touch(virtual_stick &stick, float fx, float fy, SDL_FingerID fid,
-                                float zone_x_min, float zone_x_max, float zone_y_min)
+// Compute stick deflection from current finger position
+static void compute_stick_deflection(virtual_stick &stick, float fx, float fy)
 {
-	if (fx < zone_x_min || fx > zone_x_max || fy < zone_y_min)
-		return false;
-
 	float ddx = (fx - stick.center_x) / (stick.radius / aspect_ratio);
 	float ddy = (fy - stick.center_y) / stick.radius;
 	float dist = sqrtf(ddx * ddx + ddy * ddy);
-	if (dist > 1.0f)
-	{
-		ddx /= dist;
-		ddy /= dist;
-	}
-
+	if (dist > 1.0f) { ddx /= dist; ddy /= dist; }
 	stick.dx = ddx;
 	stick.dy = ddy;
-	stick.active = true;
-	stick.finger_id = fid;
 	update_stick_keys(stick, ddx, ddy);
-	return true;
 }
 
+// Fire zone test: upper-right triangle of the right half
+// In the right half (fx >= 0.5), remap fx to 0..1 within that half.
+// Diagonal: 2*(fx-0.5) - fy > 0  →  upper-right fires
+static bool in_fire_zone(float fx, float fy)
+{
+	float rx = (fx - 0.5f) * 2.0f;  // 0..1 within right half
+	return (rx - fy) > 0.0f;
+}
+
+// Update fire state for the right stick based on current finger position
+static void update_fire_state(virtual_stick &stick, float fx, float fy)
+{
+	bool want_fire = in_fire_zone(fx, fy);
+	if (want_fire != stick.firing)
+	{
+		stick.firing = want_fire;
+		send_key_event(SDL_SCANCODE_LCTRL, want_fire);
+	}
+}
+
+// --- Texture loading ---
+
 #if !DXX_USE_VULKAN
-// Draw circles with aspect-ratio correction so they appear round.
-// The radius `r` is in normalized Y units; X is scaled by 1/aspect_ratio.
+static GLuint load_png_texture(const unsigned char *data, std::size_t size, bool &is_placeholder)
+{
+	int w, h, channels;
+	unsigned char *pixels = stbi_load_from_memory(data, static_cast<int>(size), &w, &h, &channels, 4);
+	if (!pixels)
+	{
+		is_placeholder = true;
+		return 0;
+	}
+	// Mark as placeholder if 1x1 (our fallback indicator)
+	is_placeholder = (w <= 2 && h <= 2);
+
+	GLuint tex = 0;
+	glGenTextures(1, &tex);
+	glBindTexture(GL_TEXTURE_2D, tex);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+	glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, w, h, 0, GL_RGBA, GL_UNSIGNED_BYTE, pixels);
+	glBindTexture(GL_TEXTURE_2D, 0);
+	stbi_image_free(pixels);
+	return tex;
+}
+
+static void init_button_textures()
+{
+	for (int i = 0; i < BTN_COUNT; i++)
+	{
+		if (static_cast<std::size_t>(i) < touch_icons::button_icon_count)
+		{
+			auto &icon = touch_icons::button_icons[i];
+			button_textures[i] = load_png_texture(icon.data, icon.size, button_texture_is_placeholder[i]);
+		}
+		else
+		{
+			button_textures[i] = 0;
+			button_texture_is_placeholder[i] = true;
+		}
+	}
+}
+
+static void destroy_button_textures()
+{
+	for (int i = 0; i < BTN_COUNT; i++)
+	{
+		if (button_textures[i])
+		{
+			glDeleteTextures(1, &button_textures[i]);
+			button_textures[i] = 0;
+		}
+	}
+}
+#endif
+
+// --- Drawing helpers (GLES 1.x) ---
+
+#if !DXX_USE_VULKAN
 static void draw_circle(float cx, float cy, float r, int segments,
                         float cr, float cg, float cb, float alpha)
 {
-	std::array<GLfloat, 128> verts;  // max 64 segments * 2
+	std::array<GLfloat, 128> verts;
 	if (segments > 64) segments = 64;
 	const float rx = r / aspect_ratio;
 	for (int i = 0; i < segments; i++)
@@ -222,8 +269,7 @@ static void draw_circle(float cx, float cy, float r, int segments,
 static void draw_filled_circle(float cx, float cy, float r, int segments,
                                float cr, float cg, float cb, float alpha)
 {
-	// Triangle fan: center + rim vertices
-	std::array<GLfloat, 130> verts;  // (1 + max 64) * 2
+	std::array<GLfloat, 130> verts;
 	if (segments > 64) segments = 64;
 	const float rx = r / aspect_ratio;
 	verts[0] = cx;
@@ -244,12 +290,7 @@ static void draw_filled_circle(float cx, float cy, float r, int segments,
 static void draw_filled_rect(float x, float y, float w, float h,
                              float r, float g, float b, float a)
 {
-	const GLfloat verts[] = {
-		x, y,
-		x + w, y,
-		x, y + h,
-		x + w, y + h,
-	};
+	const GLfloat verts[] = { x, y, x + w, y, x, y + h, x + w, y + h };
 	glColor4f(r, g, b, a);
 	glEnableClientState(GL_VERTEX_ARRAY);
 	glVertexPointer(2, GL_FLOAT, 0, verts);
@@ -260,12 +301,7 @@ static void draw_filled_rect(float x, float y, float w, float h,
 static void draw_rect_outline(float x, float y, float w, float h,
                               float r, float g, float b, float a)
 {
-	const GLfloat verts[] = {
-		x, y,
-		x + w, y,
-		x + w, y + h,
-		x, y + h,
-	};
+	const GLfloat verts[] = { x, y, x + w, y, x + w, y + h, x, y + h };
 	glColor4f(r, g, b, a);
 	glEnableClientState(GL_VERTEX_ARRAY);
 	glVertexPointer(2, GL_FLOAT, 0, verts);
@@ -273,35 +309,46 @@ static void draw_rect_outline(float x, float y, float w, float h,
 	glDisableClientState(GL_VERTEX_ARRAY);
 }
 
+static void draw_textured_rect(float x, float y, float w, float h,
+                               GLuint tex, float alpha)
+{
+	const GLfloat verts[] = { x, y, x + w, y, x, y + h, x + w, y + h };
+	const GLfloat texcoords[] = { 0, 0, 1, 0, 0, 1, 1, 1 };
+	glEnable(GL_TEXTURE_2D);
+	glBindTexture(GL_TEXTURE_2D, tex);
+	glColor4f(1.0f, 1.0f, 1.0f, alpha);
+	glEnableClientState(GL_VERTEX_ARRAY);
+	glEnableClientState(GL_TEXTURE_COORD_ARRAY);
+	glVertexPointer(2, GL_FLOAT, 0, verts);
+	glTexCoordPointer(2, GL_FLOAT, 0, texcoords);
+	glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
+	glDisableClientState(GL_TEXTURE_COORD_ARRAY);
+	glDisableClientState(GL_VERTEX_ARRAY);
+	glBindTexture(GL_TEXTURE_2D, 0);
+	glDisable(GL_TEXTURE_2D);
+}
+
+// Draw a floating stick (only when active)
 static void draw_stick(const virtual_stick &stick, float cr, float cg, float cb)
 {
-	float alpha = stick.active ? 0.35f : 0.15f;
+	if (!stick.active)
+		return;
+
+	constexpr float alpha = 0.35f;
 	const float rx = stick.radius / aspect_ratio;
 
 	// Outer ring
 	draw_circle(stick.center_x, stick.center_y, stick.radius, 32, cr, cg, cb, alpha);
-
-	// Inner deadzone indicator
+	// Inner deadzone
 	draw_circle(stick.center_x, stick.center_y, stick.radius * 0.3f, 16, cr, cg, cb, alpha * 0.5f);
-
-	// Knob position indicator when active
-	if (stick.active)
-	{
-		float knob_x = stick.center_x + stick.dx * rx;
-		float knob_y = stick.center_y + stick.dy * stick.radius;
-		draw_filled_circle(knob_x, knob_y, 0.025f, 16, cr, cg, cb, 0.5f);
-	}
-
-	// Crosshair lines (aspect-corrected)
+	// Knob
+	float knob_x = stick.center_x + stick.dx * rx;
+	float knob_y = stick.center_y + stick.dy * stick.radius;
+	draw_filled_circle(knob_x, knob_y, 0.025f, 16, cr, cg, cb, 0.5f);
+	// Crosshair
 	glColor4f(cr, cg, cb, alpha * 0.4f);
-	const GLfloat cross_h[] = {
-		stick.center_x - rx, stick.center_y,
-		stick.center_x + rx, stick.center_y,
-	};
-	const GLfloat cross_v[] = {
-		stick.center_x, stick.center_y - stick.radius,
-		stick.center_x, stick.center_y + stick.radius,
-	};
+	const GLfloat cross_h[] = { stick.center_x - rx, stick.center_y, stick.center_x + rx, stick.center_y };
+	const GLfloat cross_v[] = { stick.center_x, stick.center_y - stick.radius, stick.center_x, stick.center_y + stick.radius };
 	glEnableClientState(GL_VERTEX_ARRAY);
 	glVertexPointer(2, GL_FLOAT, 0, cross_h);
 	glDrawArrays(GL_LINES, 0, 2);
@@ -309,9 +356,23 @@ static void draw_stick(const virtual_stick &stick, float cr, float cg, float cb)
 	glDrawArrays(GL_LINES, 0, 2);
 	glDisableClientState(GL_VERTEX_ARRAY);
 }
+
+// Draw fire zone boundary — faint diagonal line on the right half
+static void draw_fire_zone_line()
+{
+	// Diagonal from (0.5, 0.0) to (1.0, 1.0) — the fire zone boundary
+	const GLfloat verts[] = { 0.5f, 0.0f, 1.0f, 1.0f };
+	glColor4f(1.0f, 0.3f, 0.2f, 0.12f);
+	glEnableClientState(GL_VERTEX_ARRAY);
+	glVertexPointer(2, GL_FLOAT, 0, verts);
+	glDrawArrays(GL_LINES, 0, 2);
+	glDisableClientState(GL_VERTEX_ARRAY);
+}
 #endif  // !DXX_USE_VULKAN
 
 }  // anonymous namespace
+
+// --- Public API ---
 
 void touch_overlay_init(int w, int h)
 {
@@ -319,66 +380,71 @@ void touch_overlay_init(int w, int h)
 	screen_height = h;
 	aspect_ratio = static_cast<float>(w) / static_cast<float>(h);
 
-	// Left stick: lower-left area - movement (W/A/S/D)
-	left_stick.center_x = 0.15f;
-	left_stick.center_y = 0.72f;
+	// Left stick: movement (W/A/S/D) — center set on touch
+	left_stick = {};
 	left_stick.radius = 0.12f;
-	left_stick.dx = left_stick.dy = 0.0f;
-	left_stick.active = false;
-	left_stick.key_left = left_stick.key_right = left_stick.key_up = left_stick.key_down = false;
-	left_stick.sc_up = SDL_SCANCODE_W;       // accelerate
-	left_stick.sc_down = SDL_SCANCODE_S;     // reverse
-	left_stick.sc_left = SDL_SCANCODE_A;     // slide left
-	left_stick.sc_right = SDL_SCANCODE_D;    // slide right
+	left_stick.sc_up = SDL_SCANCODE_W;
+	left_stick.sc_down = SDL_SCANCODE_S;
+	left_stick.sc_left = SDL_SCANCODE_A;
+	left_stick.sc_right = SDL_SCANCODE_D;
 
-	// Right stick: lower-center area - rotation only (arrows)
-	right_stick.center_x = 0.55f;
-	right_stick.center_y = 0.72f;
+	// Right stick: look (arrows) + fire zone — center set on touch
+	right_stick = {};
 	right_stick.radius = 0.12f;
-	right_stick.dx = right_stick.dy = 0.0f;
-	right_stick.active = false;
-	right_stick.key_left = right_stick.key_right = right_stick.key_up = right_stick.key_down = false;
-	right_stick.sc_up = SDL_SCANCODE_UP;      // pitch forward
-	right_stick.sc_down = SDL_SCANCODE_DOWN;  // pitch backward
-	right_stick.sc_left = SDL_SCANCODE_LEFT;  // turn left
-	right_stick.sc_right = SDL_SCANCODE_RIGHT; // turn right
+	right_stick.sc_up = SDL_SCANCODE_UP;
+	right_stick.sc_down = SDL_SCANCODE_DOWN;
+	right_stick.sc_left = SDL_SCANCODE_LEFT;
+	right_stick.sc_right = SDL_SCANCODE_RIGHT;
 
-	// Fire stick: right-side wheel - fires AND rotates when dragged.
-	// Same rotation scancodes as right_stick so both control the same axes.
-	fire_stick.center_x = 0.85f;
-	fire_stick.center_y = 0.55f;
-	fire_stick.radius = 0.18f;
-	fire_stick.dx = fire_stick.dy = 0.0f;
-	fire_stick.active = false;
-	fire_stick.key_left = fire_stick.key_right = fire_stick.key_up = fire_stick.key_down = false;
-	fire_stick.sc_up = SDL_SCANCODE_UP;
-	fire_stick.sc_down = SDL_SCANCODE_DOWN;
-	fire_stick.sc_left = SDL_SCANCODE_LEFT;
-	fire_stick.sc_right = SDL_SCANCODE_RIGHT;
+	// Buttons along top edge (away from stick zones)
+	// Top-left group
+	buttons[BTN_ESC]            = {0.02f, 0.02f, 0.07f, 0.06f, false, -1};
+	buttons[BTN_ACCEPT]         = {0.10f, 0.02f, 0.07f, 0.06f, false, -1};
+	// Top-center
+	buttons[BTN_FLARE]          = {0.36f, 0.02f, 0.08f, 0.06f, false, -1};
+	buttons[BTN_BOMB]           = {0.46f, 0.02f, 0.08f, 0.06f, false, -1};
+	buttons[BTN_AUTOMAP]        = {0.56f, 0.02f, 0.08f, 0.06f, false, -1};
+	// Top-right
+	buttons[BTN_FIRE_SECONDARY] = {0.83f, 0.02f, 0.15f, 0.06f, false, -1};
+	// Upper sides (banking)
+	buttons[BTN_BANK_LEFT]      = {0.02f, 0.12f, 0.07f, 0.08f, false, -1};
+	buttons[BTN_BANK_RIGHT]     = {0.91f, 0.12f, 0.07f, 0.08f, false, -1};
 
-	// Buttons layout:
-	// Fire secondary - right side upper (above fire wheel)
-	buttons[BTN_FIRE_SECONDARY] = {0.82f, 0.18f, 0.16f, 0.12f, false, -1};
-	// Bank left - left side, above stick
-	buttons[BTN_BANK_LEFT]      = {0.02f, 0.32f, 0.12f, 0.12f, false, -1};
-	// Bank right - top right area
-	buttons[BTN_BANK_RIGHT]     = {0.78f, 0.02f, 0.10f, 0.07f, false, -1};
-	// Flare - top center-left
-	buttons[BTN_FLARE]          = {0.36f, 0.02f, 0.10f, 0.07f, false, -1};
-	// Bomb - top center-right
-	buttons[BTN_BOMB]           = {0.50f, 0.02f, 0.10f, 0.07f, false, -1};
-	// Automap - top right
-	buttons[BTN_AUTOMAP]        = {0.90f, 0.02f, 0.08f, 0.07f, false, -1};
-	// Escape/Back - top left
-	buttons[BTN_ESC]            = {0.02f, 0.02f, 0.08f, 0.07f, false, -1};
-	// Accept/Enter - next to escape, top left
-	buttons[BTN_ACCEPT]         = {0.12f, 0.02f, 0.08f, 0.07f, false, -1};
-
-	// Toggle button - small, always visible, top center
-	toggle_button = {0.22f, 0.02f, 0.06f, 0.05f, false, -1};
+	// Toggle button — always visible, top center-left
+	toggle_button = {0.20f, 0.02f, 0.06f, 0.05f, false, -1};
 
 	controls_visible = true;
 	overlay_initialized = true;
+
+#if !DXX_USE_VULKAN
+	init_button_textures();
+#endif
+}
+
+void touch_overlay_shutdown()
+{
+	if (!overlay_initialized)
+		return;
+#if !DXX_USE_VULKAN
+	destroy_button_textures();
+#endif
+	// Release any held keys
+	release_all_stick_keys(left_stick);
+	release_all_stick_keys(right_stick);
+	if (right_stick.firing)
+	{
+		right_stick.firing = false;
+		send_key_event(SDL_SCANCODE_LCTRL, false);
+	}
+	for (int i = 0; i < BTN_COUNT; i++)
+	{
+		if (buttons[i].pressed)
+		{
+			buttons[i].pressed = false;
+			send_key_event(button_scancodes[i], false);
+		}
+	}
+	overlay_initialized = false;
 }
 
 void touch_overlay_draw()
@@ -387,14 +453,14 @@ void touch_overlay_draw()
 		return;
 
 #if DXX_USE_VULKAN
-	// TODO: Vulkan touch overlay rendering
 	(void)0;
 #else
-	// Save GL state that we modify
+	// Save GL state
 	GLboolean tex2d_was_enabled, depth_was_enabled, blend_was_enabled;
 	GLint prev_matrix_mode;
 	GLfloat prev_color[4];
 	GLint prev_blend_src, prev_blend_dst;
+	GLint prev_texture;
 	glGetBooleanv(GL_TEXTURE_2D, &tex2d_was_enabled);
 	glGetBooleanv(GL_DEPTH_TEST, &depth_was_enabled);
 	glGetBooleanv(GL_BLEND, &blend_was_enabled);
@@ -402,8 +468,9 @@ void touch_overlay_draw()
 	glGetFloatv(GL_CURRENT_COLOR, prev_color);
 	glGetIntegerv(GL_BLEND_SRC, &prev_blend_src);
 	glGetIntegerv(GL_BLEND_DST, &prev_blend_dst);
+	glGetIntegerv(GL_TEXTURE_BINDING_2D, &prev_texture);
 
-	// Set up orthographic projection for overlay
+	// Set up orthographic projection
 	glMatrixMode(GL_PROJECTION);
 	glPushMatrix();
 	glLoadIdentity();
@@ -417,7 +484,7 @@ void touch_overlay_draw()
 	glEnable(GL_BLEND);
 	glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
 
-	// Always draw the toggle button (hide/show controls)
+	// Toggle button (always visible)
 	{
 		float ta = controls_visible ? 0.15f : 0.35f;
 		draw_filled_rect(toggle_button.x, toggle_button.y, toggle_button.w, toggle_button.h,
@@ -428,32 +495,40 @@ void touch_overlay_draw()
 
 	if (controls_visible)
 	{
-		// Draw left stick (blue tint - movement)
+		// Fire zone boundary (faint diagonal)
+		draw_fire_zone_line();
+
+		// Left stick (blue) — only visible when touching
 		draw_stick(left_stick, 0.4f, 0.6f, 1.0f);
 
-		// Draw right stick (green tint - rotation only)
-		draw_stick(right_stick, 0.4f, 1.0f, 0.6f);
+		// Right stick — red when firing, green when look-only
+		if (right_stick.active && right_stick.firing)
+			draw_stick(right_stick, 1.0f, 0.3f, 0.2f);
+		else
+			draw_stick(right_stick, 0.4f, 1.0f, 0.6f);
 
-		// Draw fire stick (red tint - fire + rotation wheel)
-		draw_stick(fire_stick, 1.0f, 0.3f, 0.2f);
-
-		// Draw buttons with distinct colors (skip fire primary, handled by fire_stick)
+		// Buttons
 		for (int i = 0; i < BTN_COUNT; i++)
 		{
-			if (i == BTN_FIRE_PRIMARY)
-				continue;
 			auto &b = buttons[i];
 			auto &c = button_colors[i];
 			float alpha = b.pressed ? 0.45f : 0.18f;
 
-			// Filled background
-			draw_filled_rect(b.x, b.y, b.w, b.h, c.r, c.g, c.b, alpha);
-			// Border outline
-			draw_rect_outline(b.x, b.y, b.w, b.h, c.r, c.g, c.b, alpha + 0.15f);
+			// Try textured rendering if we have a real (non-placeholder) icon
+			if (button_textures[i] && !button_texture_is_placeholder[i])
+			{
+				draw_textured_rect(b.x, b.y, b.w, b.h, button_textures[i], alpha + 0.3f);
+			}
+			else
+			{
+				// Colored rectangle fallback
+				draw_filled_rect(b.x, b.y, b.w, b.h, c.r, c.g, c.b, alpha);
+				draw_rect_outline(b.x, b.y, b.w, b.h, c.r, c.g, c.b, alpha + 0.15f);
+			}
 		}
 	}
 
-	// Restore all GL state
+	// Restore GL state
 	glMatrixMode(GL_MODELVIEW);
 	glPopMatrix();
 	glMatrixMode(GL_PROJECTION);
@@ -464,8 +539,9 @@ void touch_overlay_draw()
 	if (blend_was_enabled) glEnable(GL_BLEND); else glDisable(GL_BLEND);
 	glBlendFunc(prev_blend_src, prev_blend_dst);
 	glColor4f(prev_color[0], prev_color[1], prev_color[2], prev_color[3]);
+	glBindTexture(GL_TEXTURE_2D, prev_texture);
 	glMatrixMode(prev_matrix_mode);
-#endif  // !DXX_USE_VULKAN
+#endif
 }
 
 int touch_overlay_handle_event(const SDL_Event &event)
@@ -479,71 +555,25 @@ int touch_overlay_handle_event(const SDL_Event &event)
 	switch (event.type)
 	{
 		case SDL_FINGERDOWN:
-		case SDL_FINGERMOTION:
 		{
 			fx = event.tfinger.x;
 			fy = event.tfinger.y;
 			fid = event.tfinger.fingerId;
 
-			// Toggle button: always active, tap to hide/show controls
-			if (event.type == SDL_FINGERDOWN &&
-			    fx >= toggle_button.x && fx <= toggle_button.x + toggle_button.w &&
+			// Toggle button: always active
+			if (fx >= toggle_button.x && fx <= toggle_button.x + toggle_button.w &&
 			    fy >= toggle_button.y && fy <= toggle_button.y + toggle_button.h)
 			{
 				controls_visible = !controls_visible;
 				return 1;
 			}
 
-			// If controls are hidden, don't process anything else
 			if (!controls_visible)
 				break;
 
-			// Check left stick zone (left 35% of screen, lower 50%)
-			if ((!left_stick.active || left_stick.finger_id == fid) &&
-			    process_stick_touch(left_stick, fx, fy, fid, 0.0f, 0.35f, 0.45f))
-				return 1;
-
-			// Check right stick zone (35%-75% of screen, lower 55%)
-			if ((!right_stick.active || right_stick.finger_id == fid) &&
-			    process_stick_touch(right_stick, fx, fy, fid, 0.35f, 0.75f, 0.45f))
-				return 1;
-
-			// Fire stick: right-side wheel that fires AND rotates.
-			// Touch down starts firing; drag also controls rotation.
-			if ((!fire_stick.active || fire_stick.finger_id == fid) &&
-			    fx >= 0.72f && fy >= 0.30f)
-			{
-				if (!fire_stick.active && event.type == SDL_FINGERDOWN)
-				{
-					// Start firing on initial touch
-					fire_stick.active = true;
-					fire_stick.finger_id = fid;
-					fire_stick.dx = fire_stick.dy = 0.0f;
-					send_key_event(SDL_SCANCODE_LCTRL, true);  // fire primary
-				}
-				if (fire_stick.active && fire_stick.finger_id == fid)
-				{
-					// Update rotation from drag
-					float ddx = (fx - fire_stick.center_x) / (fire_stick.radius / aspect_ratio);
-					float ddy = (fy - fire_stick.center_y) / fire_stick.radius;
-					float dist = sqrtf(ddx * ddx + ddy * ddy);
-					if (dist > 1.0f)
-					{
-						ddx /= dist;
-						ddy /= dist;
-					}
-					fire_stick.dx = ddx;
-					fire_stick.dy = ddy;
-					update_stick_keys(fire_stick, ddx, ddy);
-					return 1;
-				}
-			}
-
-			// Check button zones (skip fire primary - handled by fire_stick)
+			// Check buttons first (priority over sticks)
 			for (int i = 0; i < BTN_COUNT; i++)
 			{
-				if (i == BTN_FIRE_PRIMARY)
-					continue;
 				auto &b = buttons[i];
 				if (fx >= b.x && fx <= b.x + b.w &&
 				    fy >= b.y && fy <= b.y + b.h)
@@ -556,6 +586,54 @@ int touch_overlay_handle_event(const SDL_Event &event)
 					}
 					return 1;
 				}
+			}
+
+			// Left half → movement stick
+			if (fx < 0.5f && !left_stick.active)
+			{
+				left_stick.active = true;
+				left_stick.finger_id = fid;
+				left_stick.center_x = fx;
+				left_stick.center_y = fy;
+				left_stick.dx = left_stick.dy = 0.0f;
+				return 1;
+			}
+
+			// Right half → look stick (+ fire zone check)
+			if (fx >= 0.5f && !right_stick.active)
+			{
+				right_stick.active = true;
+				right_stick.finger_id = fid;
+				right_stick.center_x = fx;
+				right_stick.center_y = fy;
+				right_stick.dx = right_stick.dy = 0.0f;
+				right_stick.firing = false;
+				// Check if initial touch is in fire zone
+				update_fire_state(right_stick, fx, fy);
+				return 1;
+			}
+			break;
+		}
+
+		case SDL_FINGERMOTION:
+		{
+			fx = event.tfinger.x;
+			fy = event.tfinger.y;
+			fid = event.tfinger.fingerId;
+
+			// Left stick motion
+			if (left_stick.active && left_stick.finger_id == fid)
+			{
+				compute_stick_deflection(left_stick, fx, fy);
+				return 1;
+			}
+
+			// Right stick motion (+ dynamic fire zone transitions)
+			if (right_stick.active && right_stick.finger_id == fid)
+			{
+				compute_stick_deflection(right_stick, fx, fy);
+				update_fire_state(right_stick, fx, fy);
+				return 1;
 			}
 			break;
 		}
@@ -573,30 +651,23 @@ int touch_overlay_handle_event(const SDL_Event &event)
 				return 1;
 			}
 
-			// Release right stick
+			// Release right stick (+ stop firing)
 			if (right_stick.active && right_stick.finger_id == fid)
 			{
 				right_stick.active = false;
 				right_stick.dx = right_stick.dy = 0.0f;
 				release_all_stick_keys(right_stick);
-				return 1;
-			}
-
-			// Release fire stick (stops firing AND releases rotation)
-			if (fire_stick.active && fire_stick.finger_id == fid)
-			{
-				fire_stick.active = false;
-				fire_stick.dx = fire_stick.dy = 0.0f;
-				send_key_event(SDL_SCANCODE_LCTRL, false);  // stop firing
-				release_all_stick_keys(fire_stick);
+				if (right_stick.firing)
+				{
+					right_stick.firing = false;
+					send_key_event(SDL_SCANCODE_LCTRL, false);
+				}
 				return 1;
 			}
 
 			// Release buttons
 			for (int i = 0; i < BTN_COUNT; i++)
 			{
-				if (i == BTN_FIRE_PRIMARY)
-					continue;
 				auto &b = buttons[i];
 				if (b.pressed && b.finger_id == fid)
 				{

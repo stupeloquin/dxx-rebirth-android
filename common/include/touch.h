@@ -14,6 +14,7 @@
 namespace dcx {
 
 void touch_overlay_init(int screen_w, int screen_h);
+void touch_overlay_shutdown();
 void touch_overlay_draw();
 int touch_overlay_handle_event(const SDL_Event &event);
 void touch_overlay_set_enabled(bool enabled);

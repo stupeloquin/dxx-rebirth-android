@@ -52,3 +52,22 @@ xcuserdata
 # Brewfile installation artifacts
 #################################
 Brewfile.lock.json
+
+# Game data files (copyrighted, must not be committed)
+######################################################
+*.hog
+*.HOG
+*.pig
+*.PIG
+*.mvl
+*.MVL
+*.ham
+*.HAM
+*.s11
+*.S11
+*.s22
+*.S22
+descent.hog
+descent.pig
+descent2.hog
+descent2.pig
