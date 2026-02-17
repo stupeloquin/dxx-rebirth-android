@@ -6,7 +6,21 @@ echo "=== DXX-Rebirth Android Build Script ==="
 export ANDROID_HOME=/opt/android-sdk
 export ANDROID_SDK_ROOT=$ANDROID_HOME
 export ANDROID_NDK_HOME=$ANDROID_HOME/ndk/26.1.10909125
-export PATH="$ANDROID_HOME/cmdline-tools/latest/bin:$ANDROID_HOME/platform-tools:$ANDROID_NDK_HOME:$ANDROID_HOME/cmake/3.22.1/bin:$PATH"
+export PATH="$ANDROID_HOME/cmdline-tools/latest/bin:$ANDROID_HOME/platform-tools:$ANDROID_NDK_HOME:$ANDROID_HOME/cmake/3.28.3/bin:$PATH"
+
+# Install CMake 3.28.3 if not present (needed to avoid try_compile bug in 3.22)
+if [ ! -f $ANDROID_HOME/cmake/3.28.3/bin/cmake ]; then
+    echo "=== Installing CMake 3.28.3 ==="
+    yes | sdkmanager --install "cmake;3.28.3" 2>/dev/null || true
+    if [ ! -f $ANDROID_HOME/cmake/3.28.3/bin/cmake ]; then
+        # Fallback: download directly
+        CMAKE_URL="https://github.com/Kitware/CMake/releases/download/v3.28.3/cmake-3.28.3-linux-x86_64.tar.gz"
+        wget -q "$CMAKE_URL" -O /tmp/cmake.tar.gz
+        mkdir -p $ANDROID_HOME/cmake/3.28.3
+        tar xzf /tmp/cmake.tar.gz -C $ANDROID_HOME/cmake/3.28.3 --strip-components=1
+        rm /tmp/cmake.tar.gz
+    fi
+fi
 
 DXX_ROOT=/build/dxx-rebirth
 ANDROID_PROJECT=/build/dxx-android
@@ -35,6 +49,11 @@ if [ ! -d physfs-3.2.0 ]; then
     wget -q https://github.com/icculus/physfs/archive/refs/tags/release-3.2.0.tar.gz -O physfs-3.2.0.tar.gz
     tar xzf physfs-3.2.0.tar.gz
     mv physfs-release-3.2.0 physfs-3.2.0
+fi
+
+if [ ! -f vk_mem_alloc.h ]; then
+    echo "Downloading Vulkan Memory Allocator..."
+    wget -q https://raw.githubusercontent.com/GPUOpen-LibrariesAndSDKs/VulkanMemoryAllocator/v3.1.0/include/vk_mem_alloc.h
 fi
 
 # ============================================================
@@ -68,9 +87,9 @@ PHYSFS_INSTALL=$ANDROID_PROJECT/app/jni/physfs-install
 if [ ! -f $PHYSFS_INSTALL/lib/libphysfs.a ]; then
     mkdir -p $PHYSFS_BUILD $PHYSFS_INSTALL
     cd $PHYSFS_BUILD
-    $ANDROID_HOME/cmake/3.22.1/bin/cmake \
+    $ANDROID_HOME/cmake/3.28.3/bin/cmake \
         -DCMAKE_TOOLCHAIN_FILE=$ANDROID_NDK_HOME/build/cmake/android.toolchain.cmake \
-        -DANDROID_ABI=x86_64 \
+        -DANDROID_ABI=${TARGET_ABI:-x86_64} \
         -DANDROID_PLATFORM=android-24 \
         -DCMAKE_BUILD_TYPE=Release \
         -DPHYSFS_BUILD_SHARED=OFF \
@@ -84,6 +103,44 @@ if [ ! -f $PHYSFS_INSTALL/lib/libphysfs.a ]; then
     echo "PhysFS installed to $PHYSFS_INSTALL"
 else
     echo "PhysFS already built, skipping"
+fi
+
+# ============================================================
+# Step 3b: Cross-compile libADLMIDI for Android (OPL3 MIDI synthesizer)
+# ============================================================
+echo "=== Cross-compiling libADLMIDI ==="
+ADLMIDI_INSTALL=$ANDROID_PROJECT/app/src/main/jniLibs/${TARGET_ABI:-x86_64}
+
+if [ ! -f $ADLMIDI_INSTALL/libADLMIDI.so ]; then
+    # Download libADLMIDI if not present
+    if [ ! -d $DEPS/libADLMIDI-1.5.1 ]; then
+        echo "Downloading libADLMIDI..."
+        wget -q https://github.com/Wohlstand/libADLMIDI/archive/refs/tags/v1.5.1.tar.gz -O $DEPS/libADLMIDI-1.5.1.tar.gz
+        cd $DEPS && tar xzf libADLMIDI-1.5.1.tar.gz
+    fi
+
+    ADLMIDI_BUILD=/tmp/adlmidi-build-android
+    mkdir -p $ADLMIDI_BUILD $ADLMIDI_INSTALL
+    cd $ADLMIDI_BUILD
+    $ANDROID_HOME/cmake/3.28.3/bin/cmake \
+        -DCMAKE_TOOLCHAIN_FILE=$ANDROID_NDK_HOME/build/cmake/android.toolchain.cmake \
+        -DANDROID_ABI=${TARGET_ABI:-x86_64} \
+        -DANDROID_PLATFORM=android-24 \
+        -DCMAKE_BUILD_TYPE=Release \
+        -DlibADLMIDI_STATIC=OFF \
+        -DlibADLMIDI_SHARED=ON \
+        -DWITH_EMBEDDED_BANKS=ON \
+        -DWITH_GENADLDATA=OFF \
+        -DWITH_MIDIPLAY=OFF \
+        -DWITH_VLC_PLUGIN=OFF \
+        -DWITH_OLD_UTILS=OFF \
+        -DEXAMPLE_SDL2_AUDIO=OFF \
+        $DEPS/libADLMIDI-1.5.1
+    make -j$(nproc)
+    cp libADLMIDI.so $ADLMIDI_INSTALL/
+    echo "libADLMIDI installed to $ADLMIDI_INSTALL"
+else
+    echo "libADLMIDI already built, skipping"
 fi
 
 # ============================================================
@@ -125,6 +182,67 @@ else
 fi
 
 # ============================================================
+# Step 4b: Compile Vulkan SPIR-V shaders
+# ============================================================
+echo "=== Compiling Vulkan shaders ==="
+SHADER_DIR=$DXX_ROOT/similar/arch/vk/shaders
+SHADER_OUT=$ANDROID_PROJECT/app/jni/src
+
+# Install glslangValidator if not present
+if ! command -v glslangValidator &> /dev/null; then
+    echo "Installing glslang-tools..."
+    apt-get update -qq && apt-get install -y -qq glslang-tools > /dev/null 2>&1
+fi
+
+# Function to compile a shader to a C header with embedded SPIR-V
+compile_shader() {
+    local input=$1
+    local name=$2
+    local output=$SHADER_OUT/${name}_spv.h
+    local spv_tmp=/tmp/${name}.spv
+
+    if [ ! -f "$output" ] || [ "$input" -nt "$output" ]; then
+        echo "  Compiling $input -> $output"
+        glslangValidator -V --target-env vulkan1.1 -o "$spv_tmp" "$input"
+
+        # Generate C header from SPIR-V binary
+        echo "// Auto-generated from $input" > "$output"
+        echo "#include <cstdint>" >> "$output"
+        # Use extern const for external linkage (const has internal linkage in C++ by default)
+        echo "extern const uint32_t ${name}_spv[] = {" >> "$output"
+        python3 -c "
+import struct, sys
+with open('$spv_tmp', 'rb') as f:
+    data = f.read()
+words = struct.unpack('<' + 'I' * (len(data) // 4), data)
+for i, w in enumerate(words):
+    if i % 8 == 0:
+        sys.stdout.write('    ')
+    sys.stdout.write('0x%08x,' % w)
+    if i % 8 == 7:
+        sys.stdout.write('\n')
+    else:
+        sys.stdout.write(' ')
+if len(words) % 8 != 0:
+    sys.stdout.write('\n')
+" >> "$output"
+        echo "};" >> "$output"
+        echo "extern const uint32_t ${name}_spv_size = sizeof(${name}_spv);" >> "$output"
+        rm -f "$spv_tmp"
+    else
+        echo "  $output already up to date"
+    fi
+}
+
+compile_shader "$SHADER_DIR/basic.vert" "basic_vert"
+compile_shader "$SHADER_DIR/basic.frag" "basic_frag"
+compile_shader "$SHADER_DIR/textured.vert" "textured_vert"
+compile_shader "$SHADER_DIR/textured.frag" "textured_frag"
+
+# Copy VMA header to build location
+cp $DEPS/vk_mem_alloc.h $ANDROID_PROJECT/app/jni/src/vk_mem_alloc.h 2>/dev/null || true
+
+# ============================================================
 # Step 5: Configure Android project build files
 # ============================================================
 echo "=== Configuring Android project ==="
@@ -159,7 +277,7 @@ android {
         versionName "0.61.0"
 
         ndk {
-            abiFilters 'x86_64'
+            abiFilters 'PLACEHOLDER_ABI'
         }
 
         externalNativeBuild {
@@ -180,7 +298,7 @@ android {
     externalNativeBuild {
         cmake {
             path "jni/src/CMakeLists.txt"
-            version "3.22.1"
+            version "3.28.3"
         }
     }
 
@@ -198,6 +316,7 @@ android {
 dependencies {
 }
 BUILDEOF
+sed -i "s/PLACEHOLDER_ABI/${TARGET_ABI:-x86_64}/" $ANDROID_PROJECT/app/build.gradle
 
 # Write top-level build.gradle
 cat > $ANDROID_PROJECT/build.gradle << 'TOPBUILDEOF'
@@ -238,11 +357,15 @@ WRAPPEREOF
 mkdir -p $ANDROID_PROJECT/app/src/main
 cat > $ANDROID_PROJECT/app/src/main/AndroidManifest.xml << 'MANIFESTEOF'
 <?xml version="1.0" encoding="utf-8"?>
-<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
 
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" />
     <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" />
+    <!-- Android 11+ broad file access for reading game data from /sdcard/dxx-rebirth/ -->
+    <uses-permission android:name="android.permission.MANAGE_EXTERNAL_STORAGE"
+        tools:ignore="ScopedStorage" />
 
     <uses-feature android:glEsVersion="0x00010001" android:required="true" />
 
@@ -250,9 +373,10 @@ cat > $ANDROID_PROJECT/app/src/main/AndroidManifest.xml << 'MANIFESTEOF'
         android:allowBackup="true"
         android:label="D1X-Rebirth"
         android:hasCode="true"
-        android:hardwareAccelerated="true">
+        android:hardwareAccelerated="true"
+        android:requestLegacyExternalStorage="true">
         <activity
-            android:name="org.libsdl.app.SDLActivity"
+            android:name="com.dxxrebirth.d1x.DxxActivity"
             android:configChanges="keyboard|keyboardHidden|orientation|screenSize|screenLayout|uiMode"
             android:screenOrientation="sensorLandscape"
             android:exported="true">
@@ -270,6 +394,11 @@ mkdir -p $ANDROID_PROJECT/app/src/main/java/org/libsdl/app
 cp $DEPS/SDL2-2.30.10/android-project/app/src/main/java/org/libsdl/app/*.java \
    $ANDROID_PROJECT/app/src/main/java/org/libsdl/app/
 
+# Copy DxxActivity.java (SDLActivity subclass for storage permission)
+mkdir -p $ANDROID_PROJECT/app/src/main/java/com/dxxrebirth/d1x
+cp $DXX_ROOT/android/DxxActivity.java \
+   $ANDROID_PROJECT/app/src/main/java/com/dxxrebirth/d1x/DxxActivity.java
+
 # ============================================================
 # Step 6: Set up the CMake build to find SDL2 and SDL2_mixer properly
 # ============================================================
@@ -279,11 +408,12 @@ cp $DEPS/SDL2-2.30.10/android-project/app/src/main/java/org/libsdl/app/*.java \
 # Update CMakeLists.txt to use add_subdirectory for SDL2 and SDL2_mixer.
 
 cat > $ANDROID_PROJECT/app/jni/src/CMakeLists.txt << 'CMAKEOF'
-cmake_minimum_required(VERSION 3.22)
+cmake_minimum_required(VERSION 3.28)
 project(d1x-rebirth C CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
+set(CMAKE_CXX_SCAN_FOR_MODULES OFF)
 
 # Root of the DXX-Rebirth source tree
 set(DXX_SRC_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../../../../dxx-rebirth")
@@ -393,6 +523,8 @@ set(DXX_COMMON_SOURCES
     ${DXX_SRC_ROOT}/common/arch/sdl/messagebox.cpp
     # Touch overlay for Android
     ${DXX_SRC_ROOT}/common/arch/sdl/touch.cpp
+    # ADLMIDI dynamic loader (OPL3 MIDI synthesizer)
+    ${DXX_SRC_ROOT}/common/music/adlmidi_dynamic.cpp
 )
 
 # --------------------------------------------------------------------------
@@ -505,7 +637,7 @@ add_library(main SHARED
 # Include directories
 # --------------------------------------------------------------------------
 target_include_directories(main PRIVATE
-    # Our hand-crafted dxxsconf.h and generated kconfig.udlr.h
+    # Our hand-crafted dxxsconf.h, generated kconfig.udlr.h, VMA, SPIR-V headers
     ${CMAKE_CURRENT_SOURCE_DIR}
     # DXX-Rebirth include paths (matches SConstruct CPPPATH)
     ${DXX_SRC_ROOT}/common/include
@@ -562,6 +694,7 @@ target_link_libraries(main PRIVATE
     EGL
     log
     android
+    dl
     m
 )
 CMAKEOF

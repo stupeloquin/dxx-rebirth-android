@@ -10,6 +10,9 @@
 
 #include "adlmidi_dynamic.h"
 #include "console.h"
+#ifdef __ANDROID__
+#include <SDL.h>
+#endif
 #if !defined(_WIN32)
 #include <dlfcn.h>
 #else
@@ -94,10 +97,20 @@ static ADL_MIDIPlayer *adl_init_first_call(long sample_rate)
 		if (handle)
 			dlclose(handle);
 		else
+		{
 			con_printf(CON_NORMAL, "ADLMIDI: failed to load the dynamic library \"%s\"", library_name);
+#ifdef __ANDROID__
+			SDL_Log("DXX-ADLMIDI: failed to load \"%s\": %s", library_name, dlerror());
+#endif
+		}
 	}
 	else
+	{
 		con_printf(CON_NORMAL, "ADLMIDI: loaded the dynamic OPL3 synthesizer");
+#ifdef __ANDROID__
+		SDL_Log("DXX-ADLMIDI: loaded the dynamic OPL3 synthesizer");
+#endif
+	}
 	return adl_init(sample_rate);
 }
 

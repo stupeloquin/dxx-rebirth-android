@@ -1,8 +1,9 @@
-cmake_minimum_required(VERSION 3.22)
+cmake_minimum_required(VERSION 3.28)
 project(d1x-rebirth C CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
+set(CMAKE_CXX_SCAN_FOR_MODULES OFF)
 
 # Root of the DXX-Rebirth source tree
 set(DXX_SRC_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../../../../dxx-rebirth")
@@ -112,6 +113,8 @@ set(DXX_COMMON_SOURCES
     ${DXX_SRC_ROOT}/common/arch/sdl/messagebox.cpp
     # Touch overlay for Android
     ${DXX_SRC_ROOT}/common/arch/sdl/touch.cpp
+    # ADLMIDI dynamic loader (OPL3 MIDI synthesizer)
+    ${DXX_SRC_ROOT}/common/music/adlmidi_dynamic.cpp
 )
 
 # --------------------------------------------------------------------------
@@ -224,7 +227,7 @@ add_library(main SHARED
 # Include directories
 # --------------------------------------------------------------------------
 target_include_directories(main PRIVATE
-    # Our hand-crafted dxxsconf.h and generated kconfig.udlr.h
+    # Our hand-crafted dxxsconf.h, generated kconfig.udlr.h, VMA, SPIR-V headers
     ${CMAKE_CURRENT_SOURCE_DIR}
     # DXX-Rebirth include paths (matches SConstruct CPPPATH)
     ${DXX_SRC_ROOT}/common/include
@@ -281,5 +284,6 @@ target_link_libraries(main PRIVATE
     EGL
     log
     android
+    dl
     m
 )

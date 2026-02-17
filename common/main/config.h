@@ -62,8 +62,16 @@ struct CCfg : prohibit_void_ptr<CCfg>
 	/* See common/include/adlmidi_dynamic.h for the symbolic name and for other
 	 * values.
 	 */
+#ifdef __ANDROID__
+	/* On Android, default to the Descent-specific instrument bank and enable
+	 * ADLMIDI since there is no other MIDI playback mechanism available.
+	 */
+	int ADLMIDI_bank{2};
+	bool ADLMIDI_enabled{true};
+#else
 	int ADLMIDI_bank{31};
 	bool ADLMIDI_enabled;
+#endif
 #endif
 	bool VSync;
 	bool Grabinput;

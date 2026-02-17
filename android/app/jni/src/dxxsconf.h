@@ -8,7 +8,10 @@
 /* Build Descent 1 */
 #define DXX_BUILD_DESCENT 1
 
-/* OpenGL ES rendering */
+/* Vulkan rendering disabled - using OpenGL ES */
+#define DXX_USE_VULKAN 0
+
+/* OpenGL ES rendering (still needed for type definitions) */
 #define DXX_USE_OGL 1
 #define DXX_USE_OGLES 1
 
@@ -30,8 +33,8 @@
 #define DXX_USE_IPv6 0
 #define DXX_USE_TRACKER 0
 
-/* No ADLMIDI */
-#define DXX_USE_ADLMIDI 0
+/* ADLMIDI OPL3 synthesizer for MIDI music playback */
+#define DXX_USE_ADLMIDI 1
 
 /* No stereoscopic rendering */
 #define DXX_USE_STEREOSCOPIC_RENDER 0
