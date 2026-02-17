@@ -1353,7 +1353,7 @@ int state_save_all_sub(const char *filename, const char *desc)
 		}
 
 		{
-#if DXX_USE_OGL
+#if DXX_USE_OGL && !DXX_USE_VULKAN
 			const auto buf = std::make_unique<uint8_t[]>(THUMBNAIL_W * THUMBNAIL_H * 4);
 #if !DXX_USE_OGLES
 		GLint gl_draw_buffer;

@@ -13,8 +13,11 @@
 
 #ifdef __ANDROID__
 
+#include "dxxsconf.h"
 #include <SDL.h>
+#if !DXX_USE_VULKAN
 #include <GLES/gl.h>
+#endif
 #include <cmath>
 #include <array>
 #include "touch.h"
@@ -87,6 +90,7 @@ static void send_joy_axis(Uint8 axis, Sint16 value)
 	SDL_PushEvent(&ev);
 }
 
+#if !DXX_USE_VULKAN
 static void draw_circle(float cx, float cy, float r, int segments, float alpha)
 {
 	std::array<GLfloat, 128> verts;  // max 64 segments * 2
@@ -118,6 +122,7 @@ static void draw_filled_rect(float x, float y, float w, float h, float r, float 
 	glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
 	glDisableClientState(GL_VERTEX_ARRAY);
 }
+#endif  // !DXX_USE_VULKAN
 
 }  // anonymous namespace
 
@@ -157,6 +162,10 @@ void touch_overlay_draw()
 	if (!overlay_enabled || !overlay_initialized)
 		return;
 
+#if DXX_USE_VULKAN
+	// TODO: Vulkan touch overlay rendering
+	(void)0;
+#else
 	// Save GL state
 	glPushMatrix();
 	glMatrixMode(GL_PROJECTION);
@@ -206,6 +215,7 @@ void touch_overlay_draw()
 	glPopMatrix();
 	glMatrixMode(GL_MODELVIEW);
 	glPopMatrix();
+#endif  // !DXX_USE_VULKAN
 }
 
 int touch_overlay_handle_event(const SDL_Event &event)

@@ -10,6 +10,19 @@
 #error "This file can only be included in OpenGL enabled builds."
 #endif
 
+#if DXX_USE_VULKAN
+// Vulkan mode: no GL headers needed; provide stub GL types for ogl_texture
+typedef unsigned int GLuint;
+typedef int GLint;
+typedef unsigned int GLenum;
+typedef float GLfloat;
+typedef unsigned char GLboolean;
+typedef int GLsizei;
+typedef unsigned char GLubyte;
+typedef signed char GLbyte;
+#define GL_REPEAT 0x2901
+#define GL_CLAMP_TO_EDGE 0x812F
+#else
 #ifdef _WIN32
 #include "loadgl.h"
 #else
@@ -27,3 +40,4 @@
 #		endif
 #	endif
 #endif
+#endif  // DXX_USE_VULKAN

@@ -10,6 +10,9 @@
  * lagging behind too much.
  */
 
+#include "dxxsconf.h"
+#if !DXX_USE_VULKAN
+
 #include <stdlib.h>
 #include <SDL.h>
 
@@ -130,3 +133,5 @@ void ogl_sync::deinit()
 }
 
 }
+
+#endif  // !DXX_USE_VULKAN
