@@ -9,6 +9,7 @@
 #include "vk_common.h"
 #include <SDL.h>
 #include <SDL_vulkan.h>
+#include <SDL_log.h>
 #include "game.h"
 #include "gr.h"
 #include "gamefont.h"
@@ -155,11 +156,14 @@ int gr_init()
 	// Initialize Vulkan
 	int w, h;
 	SDL_Vulkan_GetDrawableSize(SDLWindow, &w, &h);
+	SDL_Log("VK: gr_init - initializing Vulkan renderer %dx%d", w, h);
 	if (!vk_init(SDLWindow, w, h))
 	{
 		con_puts(CON_URGENT, "VK: Failed to initialize Vulkan renderer");
+		SDL_Log("VK: Failed to initialize Vulkan renderer");
 		return -1;
 	}
+	SDL_Log("VK: gr_init - Vulkan renderer initialized successfully");
 
 	grd_curscreen = std::make_unique<grs_screen>();
 	*grd_curscreen = {};
@@ -210,6 +214,8 @@ void gr_palette_load(palette_array_t &pal)
 	reset_computed_colors();
 }
 
+static unsigned s_frame_count = 0;
+
 void gr_flip(void)
 {
 	if (!g_vk.frame_started && !vk_begin_frame())
@@ -217,6 +223,10 @@ void gr_flip(void)
 
 	vk_end_frame();
 	vk_present();
+
+	s_frame_count++;
+	if (s_frame_count <= 5 || s_frame_count % 60 == 0)
+		SDL_Log("VK: gr_flip frame %u", s_frame_count);
 
 	// Begin next frame immediately
 	vk_begin_frame();

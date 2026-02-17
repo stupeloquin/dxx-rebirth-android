@@ -9,11 +9,14 @@
 #include "vk_common.h"
 #include <SDL.h>
 #include <SDL_vulkan.h>
+#include <SDL_log.h>
 #include "console.h"
 #include "dxxerror.h"
 
-// Use only Vulkan 1.0 functions (Android can't statically link 1.1+)
-#define VMA_VULKAN_VERSION 1000000
+// Android can't statically link Vulkan 1.1+ functions.
+// Use VMA's dynamic function loading to resolve them at runtime.
+#define VMA_STATIC_VULKAN_FUNCTIONS 0
+#define VMA_DYNAMIC_VULKAN_FUNCTIONS 1
 #define VMA_IMPLEMENTATION
 #include "vk_mem_alloc.h"
 
@@ -106,10 +109,12 @@ static bool vk_create_instance(SDL_Window *window)
 #endif
 		{
 			con_puts(CON_URGENT, "VK: Failed to create Vulkan instance");
+			SDL_Log("VK: Failed to create Vulkan instance");
 			return false;
 		}
 	}
 	con_puts(CON_DEBUG, "VK: Instance created");
+	SDL_Log("VK: Instance created");
 	return true;
 }
 
@@ -131,6 +136,7 @@ static bool vk_select_physical_device()
 	VkPhysicalDeviceProperties props;
 	vkGetPhysicalDeviceProperties(g_vk.physical_device, &props);
 	con_printf(CON_DEBUG, "VK: Using GPU: %s", props.deviceName);
+	SDL_Log("VK: Using GPU: %s", props.deviceName);
 	return true;
 }
 
@@ -185,20 +191,28 @@ static bool vk_create_device()
 	}
 	vkGetDeviceQueue(g_vk.device, g_vk.queue_family, 0, &g_vk.graphics_queue);
 	con_puts(CON_DEBUG, "VK: Device created");
+	SDL_Log("VK: Device created");
 	return true;
 }
 
 static bool vk_create_allocator()
 {
+	// Set up dynamic Vulkan function pointers for VMA
+	VmaVulkanFunctions vma_funcs{};
+	vma_funcs.vkGetInstanceProcAddr = vkGetInstanceProcAddr;
+	vma_funcs.vkGetDeviceProcAddr = vkGetDeviceProcAddr;
+
 	VmaAllocatorCreateInfo ci{};
 	ci.physicalDevice = g_vk.physical_device;
 	ci.device = g_vk.device;
 	ci.instance = g_vk.instance;
 	ci.vulkanApiVersion = VK_API_VERSION_1_1;
+	ci.pVulkanFunctions = &vma_funcs;
 
 	if (vmaCreateAllocator(&ci, &g_vk.allocator) != VK_SUCCESS)
 	{
 		con_puts(CON_URGENT, "VK: Failed to create VMA allocator");
+		SDL_Log("VK: Failed to create VMA allocator");
 		return false;
 	}
 	return true;
@@ -254,6 +268,7 @@ static bool vk_create_swapchain(uint32_t w, uint32_t h)
 	if (vkCreateSwapchainKHR(g_vk.device, &sci, nullptr, &g_vk.swapchain) != VK_SUCCESS)
 	{
 		con_puts(CON_URGENT, "VK: Failed to create swapchain");
+		SDL_Log("VK: Failed to create swapchain");
 		return false;
 	}
 
@@ -284,6 +299,9 @@ static bool vk_create_swapchain(uint32_t w, uint32_t h)
 		}
 	}
 
+	SDL_Log("VK: Swapchain created %ux%u, %u images",
+	        g_vk.swapchain_extent.width, g_vk.swapchain_extent.height,
+	        static_cast<unsigned>(g_vk.swapchain_images.size()));
 	con_printf(CON_DEBUG, "VK: Swapchain created %ux%u, %u images", 
 		g_vk.swapchain_extent.width, g_vk.swapchain_extent.height, image_count);
 	return true;
@@ -563,6 +581,7 @@ bool vk_init(SDL_Window *window, uint32_t w, uint32_t h)
 
 	g_vk.initialized = true;
 	con_puts(CON_DEBUG, "VK: Initialization complete");
+	SDL_Log("VK: Initialization complete");
 	return true;
 }
 
@@ -663,14 +682,30 @@ bool vk_begin_frame()
 
 	auto &frame = g_vk.frames[g_vk.current_frame];
 
-	vkWaitForFences(g_vk.device, 1, &frame.fence, VK_TRUE, UINT64_MAX);
+	// Use 1 second timeout instead of UINT64_MAX to avoid hangs on emulators
+	VkResult fence_result = vkWaitForFences(g_vk.device, 1, &frame.fence, VK_TRUE, 1000000000ULL);
+	if (fence_result == VK_TIMEOUT)
+	{
+		SDL_Log("VK: vkWaitForFences timed out (frame %u)", g_vk.current_frame);
+		return false;
+	}
 
-	VkResult result = vkAcquireNextImageKHR(g_vk.device, g_vk.swapchain, UINT64_MAX,
+	VkResult result = vkAcquireNextImageKHR(g_vk.device, g_vk.swapchain, 1000000000ULL,
 	                                         frame.image_available, VK_NULL_HANDLE,
 	                                         &g_vk.current_image_index);
-	if (result == VK_ERROR_OUT_OF_DATE_KHR)
+	if (result == VK_ERROR_OUT_OF_DATE_KHR || result == VK_SUBOPTIMAL_KHR)
 	{
 		vk_recreate_swapchain(g_vk.screen_width, g_vk.screen_height);
+		return false;
+	}
+	if (result == VK_TIMEOUT || result == VK_NOT_READY)
+	{
+		SDL_Log("VK: vkAcquireNextImageKHR timed out/not ready");
+		return false;
+	}
+	if (result != VK_SUCCESS)
+	{
+		SDL_Log("VK: vkAcquireNextImageKHR failed: %d", result);
 		return false;
 	}
 
@@ -735,7 +770,9 @@ void vk_present()
 	submit.signalSemaphoreCount = 1;
 	submit.pSignalSemaphores = &frame.render_finished;
 
-	vkQueueSubmit(g_vk.graphics_queue, 1, &submit, frame.fence);
+	VkResult submit_result = vkQueueSubmit(g_vk.graphics_queue, 1, &submit, frame.fence);
+	if (submit_result != VK_SUCCESS)
+		SDL_Log("VK: vkQueueSubmit failed: %d", submit_result);
 
 	VkPresentInfoKHR present{};
 	present.sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR;
@@ -745,7 +782,9 @@ void vk_present()
 	present.pSwapchains = &g_vk.swapchain;
 	present.pImageIndices = &g_vk.current_image_index;
 
-	vkQueuePresentKHR(g_vk.graphics_queue, &present);
+	VkResult present_result = vkQueuePresentKHR(g_vk.graphics_queue, &present);
+	if (present_result != VK_SUCCESS && present_result != VK_SUBOPTIMAL_KHR)
+		SDL_Log("VK: vkQueuePresentKHR failed: %d", present_result);
 
 	g_vk.current_frame = (g_vk.current_frame + 1) % VK_MAX_FRAMES_IN_FLIGHT;
 }
