@@ -28,6 +28,7 @@
 #include "physfs_list.h"
 #ifdef __ANDROID__
 #include <SDL.h>
+#include <sys/stat.h>
 #endif
 
 #include "compiler-range_for.h"
@@ -232,6 +233,19 @@ bool PHYSFSX_init(int argc, char *argv[])
 		// This path is /sdcard/Android/data/<pkg>/files/ on most devices.
 		PHYSFS_mount("/sdcard/Android/data/com.dxxrebirth.d1x/files", nullptr, 1);
 		PHYSFS_mount("/storage/emulated/0/Android/data/com.dxxrebirth.d1x/files", nullptr, 1);
+
+		// User-friendly shared storage paths.
+		// With MANAGE_EXTERNAL_STORAGE permission (Android 11+) or
+		// legacy storage (Android 10), users can simply:
+		//   adb push descent.hog /sdcard/dxx-rebirth/
+		// No root required.
+		PHYSFS_mount("/storage/emulated/0/dxx-rebirth", nullptr, 1);
+		PHYSFS_mount("/storage/emulated/0/DXX-Rebirth", nullptr, 1);
+		PHYSFS_mount("/sdcard/dxx-rebirth", nullptr, 1);
+		PHYSFS_mount("/sdcard/DXX-Rebirth", nullptr, 1);
+
+		// Best-effort: try to create the directory so it's visible to users.
+		mkdir("/storage/emulated/0/dxx-rebirth", 0755);
 	}
 #endif
 
