@@ -9,13 +9,28 @@
  * We use global function pointer for any extension function we want to use.
  */
 
+#include "dxxsconf.h"
+
+#if DXX_USE_VULKAN
+// Vulkan mode: provide stub definitions for extern variables declared in ogl_extensions.h
+#include "ogl_extensions.h"
+#include "dsx-ns.h"
+namespace dcx {
+bool ogl_have_ARB_sync = false;
+PFNGLFENCESYNCPROC glFenceSyncFunc = nullptr;
+PFNGLDELETESYNCPROC glDeleteSyncFunc = nullptr;
+PFNGLCLIENTWAITSYNCPROC glClientWaitSyncFunc = nullptr;
+GLfloat ogl_maxanisotropy = 0.0f;
+void ogl_extensions_init() {}
+}
+#else
+
 #include <string.h>
 #include <SDL.h>
 
 #include "ogl_extensions.h"
 #include "console.h"
 
-#include "dxxsconf.h"
 #include "dsx-ns.h"
 #include <array>
 
@@ -141,3 +156,5 @@ void ogl_extensions_init()
 }
 
 }
+
+#endif  // !DXX_USE_VULKAN

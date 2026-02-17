@@ -14,12 +14,18 @@
 #include <cstdint>
 
 #include "dxxsconf.h"
+#if DXX_USE_VULKAN
+// Vulkan mode: provide minimal GL types for function pointer declarations
+#include "d_gl.h"
+typedef unsigned int GLbitfield;
+#else
 #if defined(__APPLE__) && defined(__MACH__)
 #include <OpenGL/gl.h>
 #elif DXX_USE_OGLES
 #include <GLES/gl.h>
 #else
 #include <GL/gl.h>
+#endif
 #endif
 
 /* global extension stuff (from glext.h)

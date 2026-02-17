@@ -11,6 +11,7 @@
  */
 
 #include "dxxsconf.h"
+#if !DXX_USE_VULKAN
 #include <bit>
 #include <stdexcept>
 #include <tuple>
@@ -2103,3 +2104,5 @@ bool ogl_ubitblt_cs(grs_canvas &canvas, int dw, int dh, int dx, int dy, int sx, 
 }
 
 }
+
+#endif  // !DXX_USE_VULKAN

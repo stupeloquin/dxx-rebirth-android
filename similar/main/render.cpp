@@ -1702,9 +1702,13 @@ void render_mine(grs_canvas &canvas, const vms_vector &Viewer_eye, const vcsegid
 									// Do NOT render geometry with blending textures. Since we've not rendered any objects, yet, they would disappear behind them.
 									continue;
 							}
+#if !DXX_USE_VULKAN
 							glAlphaFunc(GL_GEQUAL,0.8); // prevent ugly outlines if an object (which is rendered later) is shown behind a grate, door, etc. if texture filtering is enabled. These sides are rendered later again with normal AlphaFunc
+#endif
 							render_side(vcvertptr, canvas, seg, sn, wid, Viewer_eye);
+#if !DXX_USE_VULKAN
 							glAlphaFunc(GL_GEQUAL,0.02);
+#endif
 						}
 						else
 							render_side(vcvertptr, canvas, seg, sn, wid, Viewer_eye);

@@ -10,6 +10,9 @@
  *
  */
 
+#include "dxxsconf.h"
+#if !DXX_USE_VULKAN
+
 #define DECLARE_VARS
 
 #ifdef RPI
@@ -1229,3 +1232,5 @@ void write_bmp(PHYSFS_File *const TGAFile, const unsigned w, const unsigned h)
 #endif
 
 }
+
+#endif  // !DXX_USE_VULKAN
