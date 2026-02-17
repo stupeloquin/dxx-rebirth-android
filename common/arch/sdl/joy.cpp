@@ -201,6 +201,9 @@ window_event_result joy_button_handler(const SDL_JoyButtonEvent *const jbe)
 		button
 	};
 	con_printf(CON_DEBUG, "Sending event %s, button %d", (jbe->type == SDL_JOYBUTTONDOWN) ? "event_type::joystick_button_down" : "EVENT_JOYSTICK_JOYSTICK_UP", event.button);
+#ifdef __ANDROID__
+	SDL_Log("DXX-JOY: phys_button %s raw=%d vbtn=%d", (jbe->type == SDL_JOYBUTTONDOWN) ? "DOWN" : "UP", jbe->button, event.button);
+#endif
 	return event_send(event);
 }
 #endif
@@ -245,6 +248,9 @@ window_event_result joy_hat_handler(const SDL_JoyHatEvent *const jhe)
 		{
 			con_printf(CON_DEBUG, "Sending event event_type::joystick_button_up, button %d", event.button);
 		}
+#ifdef __ANDROID__
+		SDL_Log("DXX-JOY: hat %s hat_idx=%d dir=%d vbtn=%d", current_button_state ? "DOWN" : "UP", jhe->hat, i, event.button);
+#endif
 		highest_result = std::max(event_send(event), highest_result);
 	}
 
@@ -261,6 +267,9 @@ static window_event_result send_axis_button_event(unsigned button, event_type e)
 	Joystick.button_state[button] = (e == event_type::joystick_button_up) ? 0 : 1;
 	const d_event_joystickbutton event{ e, button };
 	con_printf(CON_DEBUG, "Sending event %s, button %d", (e == event_type::joystick_button_up) ? "event_type::joystick_button_up" : "event_type::joystick_button_down", event.button);
+#ifdef __ANDROID__
+	SDL_Log("DXX-JOY: axis_button %s vbtn=%d", (e == event_type::joystick_button_up) ? "UP" : "DOWN", event.button);
+#endif
 	return event_send(event);
 }
 
@@ -279,6 +288,10 @@ window_event_result joy_axisbutton_handler(const SDL_JoyAxisEvent *const jae)
 	const decltype(axis_value) deadzone = 38;
 	auto prev_value = apply_deadzone(axis_value, deadzone);
 	auto new_value = apply_deadzone(jae->value/256, deadzone);
+#ifdef __ANDROID__
+	if (prev_value != new_value && (new_value > 0 || new_value < 0))
+		SDL_Log("DXX-JOY: axisbutton raw_axis=%d base_vbtn=%d raw_val=%d prev=%d new=%d", jae->axis, button, jae->value/256, prev_value, new_value);
+#endif
 
 	if (prev_value <= 0 && new_value >= 0) // positive pressed
 	{
@@ -367,6 +380,21 @@ void joy_init()
 #endif
 		if (handle)
 		{
+#ifdef __ANDROID__
+			// Skip sensor-only devices (gyroscope, accelerometer) that have
+			// no buttons or hats - they interfere with menu navigation
+			{
+				const auto probe_buttons = SDL_JoystickNumButtons(handle);
+				const auto probe_hats = SDL_JoystickNumHats(handle);
+				if (probe_buttons == 0 && probe_hats == 0)
+				{
+					con_printf(CON_NORMAL, "sdl-joystick %d: skipping sensor device (0 buttons, 0 hats, %d axes)", i, SDL_JoystickNumAxes(handle));
+					SDL_Log("DXX-JOY: skipping sensor joy %d (0 buttons, %d axes)", i, SDL_JoystickNumAxes(handle));
+					joystick.handle().reset();
+					continue;
+				}
+			}
+#endif
 #if DXX_MAX_AXES_PER_JOYSTICK
 			const auto n_axes = check_warn_joy_support_limit(SDL_JoystickNumAxes(handle), "axe", DXX_MAX_AXES_PER_JOYSTICK);
 
@@ -388,6 +416,9 @@ void joy_init()
 			const auto n_virtual_buttons = n_buttons + (4 * n_hats) + (2 * n_axes);
 			joybutton_text.resize(joybutton_text.size() + n_virtual_buttons);
 			joy_key_map.resize(joy_key_map.size() + n_virtual_buttons, 0);
+#ifdef __ANDROID__
+			SDL_Log("DXX-JOY: init joy %d: n_buttons=%d n_hats=%d n_axes=%d total_vbtns=%d", i, n_buttons, n_hats, n_axes, n_virtual_buttons);
+#endif
 #if DXX_MAX_BUTTONS_PER_JOYSTICK
 			for (auto &&[idx, value] : enumerate(partial_range(joystick.button_map(), n_buttons), 1))
 			{
