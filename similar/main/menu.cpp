@@ -121,7 +121,9 @@ enum class main_menu_item_index : uint8_t
 #if DXX_USE_EDITOR
     open_mine_editor_window,
 #endif
+#ifndef __ANDROID__
 	open_coder_sandbox_submenu,
+#endif
 #endif
 	end,
 };
@@ -181,7 +183,9 @@ main_menu_items::main_menu_items()
 #if DXX_USE_EDITOR
 	nm_set_item_menu(m[main_menu_item_index::open_mine_editor_window], "  Editor");
 #endif
+#ifndef __ANDROID__
 	nm_set_item_menu(m[main_menu_item_index::open_coder_sandbox_submenu], "  SANDBOX");
+#endif
 #endif
 }
 
@@ -701,9 +705,11 @@ window_event_result dispatch_menu_option(const main_menu_item_index select)
 			credits_show();
 			break;
 #ifndef RELEASE
+#ifndef __ANDROID__
 		case main_menu_item_index::open_coder_sandbox_submenu:
 			do_sandbox_menu();
 			break;
+#endif
 #endif
 		default:
 			break;
