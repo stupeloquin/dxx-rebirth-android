@@ -371,6 +371,7 @@ cat > $ANDROID_PROJECT/app/src/main/AndroidManifest.xml << 'MANIFESTEOF'
 
     <application
         android:allowBackup="true"
+        android:icon="@mipmap/ic_launcher"
         android:label="D1X-Rebirth"
         android:hasCode="true"
         android:hardwareAccelerated="true"
