@@ -246,7 +246,11 @@ void new_player_config()
 		i.name[0] = 0;
 #endif
 	InitWeaponOrdering (); //setup default weapon priorities
-	PlayerCfg.ControlType=0; // Assume keyboard
+#ifdef __ANDROID__
+	PlayerCfg.ControlType = CONTROL_USING_JOYSTICK;
+#else
+	PlayerCfg.ControlType = 0; // Assume keyboard
+#endif
 	PlayerCfg.RespawnMode = RespawnPress::Any;
 	PlayerCfg.MouselookFlags = 0;
 	PlayerCfg.PitchLockFlags = 0;
