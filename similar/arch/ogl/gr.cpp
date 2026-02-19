@@ -749,6 +749,7 @@ int gr_set_mode(screen_mode mode)
 	ogl_init_state();
 #ifdef __ANDROID__
 	touch_overlay_init(w, h);
+	touch_overlay_set_invert_y(CGameCfg.TouchInvertY);
 #endif
 	gamefont_choose_game_font(w,h);
 	gr_remap_color_fonts();

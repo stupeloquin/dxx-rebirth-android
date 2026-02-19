@@ -108,6 +108,13 @@ Cfg GameCfg;
 #else
 #define DXX_DESCENT_CFG_ADLMIDI_BLOCK(VERB_d)	/* ADLMIDI is disabled - expand to nothing */
 #endif
+#ifdef __ANDROID__
+#define TouchInvertYStr "TouchInvertY"
+#define DXX_DESCENT_CFG_ANDROID_BLOCK(VERB_d)	\
+	VERB_d(TouchInvertYStr, CGameCfg.TouchInvertY)
+#else
+#define DXX_DESCENT_CFG_ANDROID_BLOCK(VERB_d)
+#endif
 #define VSyncStr "VSync"
 #define MultisampleStr "Multisample"
 #define FPSIndicatorStr "FPSIndicator"
@@ -156,6 +163,7 @@ namespace {
 	VERB_d(MultisampleStr, CGameCfg.Multisample)	\
 	VERB_d(FPSIndicatorStr, CGameCfg.FPSIndicator)	\
 	VERB_d(GrabinputStr, CGameCfg.Grabinput)	\
+	DXX_DESCENT_CFG_ANDROID_BLOCK(VERB_d)	\
 
 struct descent_cfg_file_prepared_text
 {
@@ -296,6 +304,9 @@ void ReadConfigFile(CCfg &CGameCfg, Cfg &GameCfg)
 	CGameCfg.Multisample = 0;
 	CGameCfg.FPSIndicator = 0;
 	CGameCfg.Grabinput = true;
+#ifdef __ANDROID__
+	CGameCfg.TouchInvertY = false;
+#endif
 
 	auto &&[infile, physfserr]{PHYSFSX_openReadBuffered_updateCase(dxx_descent_cfg_name)};
 	if (!infile)
@@ -436,6 +447,10 @@ void ReadConfigFile(CCfg &CGameCfg, Cfg &GameCfg)
 			convert_integer(CGameCfg.FPSIndicator, value);
 		else if (compare_nonterminated_name(name, GrabinputStr))
 			convert_integer(CGameCfg.Grabinput, value);
+#ifdef __ANDROID__
+		else if (compare_nonterminated_name(name, TouchInvertYStr))
+			convert_integer(CGameCfg.TouchInvertY, value);
+#endif
 	}
 
 	if (CGameCfg.ResolutionX >= 320 && CGameCfg.ResolutionY >= 200)
