@@ -1118,6 +1118,27 @@ static int gcd(int a, int b)
 	return gcd(b, a%b);
 }
 
+#ifdef __ANDROID__
+struct android_preset_resolution {
+	screen_mode mode;
+	const char *label;
+};
+static constexpr android_preset_resolution android_preset_resolutions[] = {
+	{{320, 240},    "320x240 (4:3)"},
+	{{640, 480},    "640x480 (4:3)"},
+	{{800, 600},    "800x600 (4:3)"},
+	{{1024, 768},   "1024x768 (4:3)"},
+	{{1280, 720},   "1280x720 (16:9)"},
+	{{1280, 800},   "1280x800 (16:10)"},
+	{{1366, 768},   "1366x768 (16:9)"},
+	{{1600, 1200},  "1600x1200 (4:3)"},
+	{{1920, 1080},  "1920x1080 (16:9)"},
+	{{1920, 1200},  "1920x1200 (16:10)"},
+	{{2560, 1440},  "2560x1440 (16:9)"},
+};
+static constexpr std::size_t android_num_preset_modes = std::size(android_preset_resolutions);
+#endif
+
 struct screen_resolution_menu_items
 {
 	enum
@@ -1127,12 +1148,13 @@ struct screen_resolution_menu_items
 	enum class ni_index : unsigned;
 	enum class fixed_field_index : unsigned
 	{
-#if SDL_MAJOR_VERSION == 1
-		/* SDL1 has a variable number of records before this line, so
-		 * this line exists to separate them from the next lines.
+#if SDL_MAJOR_VERSION == 1 || defined(__ANDROID__)
+		/* SDL1 and Android have a variable number of records before
+		 * this line, so this line exists to separate them from the
+		 * next lines.
 		 *
-		 * SDL2 has no records before the custom values line, so no
-		 * separator is needed.
+		 * Desktop SDL2 has no records before the custom values line,
+		 * so no separator is needed.
 		 */
 		opt_blank_custom_values,
 #endif
@@ -1158,11 +1180,19 @@ struct screen_resolution_menu_items
 		return static_cast<ni_index>(static_cast<unsigned>(i) + num_presets);
 	}
 #elif SDL_MAJOR_VERSION == 2
+#ifdef __ANDROID__
+	static constexpr std::size_t maximum_preset_modes = android_num_preset_modes;
+	ni_index convert_fixed_field_to_ni(fixed_field_index i) const
+	{
+		return static_cast<ni_index>(static_cast<unsigned>(i) + maximum_preset_modes);
+	}
+#else
 	static constexpr std::size_t maximum_preset_modes = 0;
 	static constexpr ni_index convert_fixed_field_to_ni(fixed_field_index i)
 	{
 		return static_cast<ni_index>(i);
 	}
+#endif
 #endif
 	std::array<char, 12> crestext, casptext;
 	enumerated_array<newmenu_item, maximum_preset_modes + static_cast<unsigned>(fixed_field_index::end), ni_index> m;
@@ -1191,6 +1221,17 @@ screen_resolution_menu_items::screen_resolution_menu_items()
 	}
 	/* Leave a blank line for visual separation */
 	nm_set_item_text(m[convert_fixed_field_to_ni(fixed_field_index::opt_blank_custom_values)], "");
+#elif defined(__ANDROID__)
+	for (std::size_t idx = 0; idx < android_num_preset_modes; ++idx)
+	{
+		const auto &preset = android_preset_resolutions[idx];
+		const auto checked = (citem == -1 && Game_screen_mode == preset.mode && CGameCfg.AspectY == SM_W(preset.mode) / gcd(SM_W(preset.mode), SM_H(preset.mode)) && CGameCfg.AspectX == SM_H(preset.mode) / gcd(SM_W(preset.mode), SM_H(preset.mode)));
+		if (checked)
+			citem = idx;
+		nm_set_item_radio(m[static_cast<ni_index>(idx)], preset.label, checked, grp_resolution);
+	}
+	/* Leave a blank line for visual separation */
+	nm_set_item_text(m[convert_fixed_field_to_ni(fixed_field_index::opt_blank_custom_values)], "");
 #endif
 	nm_set_item_radio(m[convert_fixed_field_to_ni(fixed_field_index::opt_radio_custom_values)], "Use custom values", (citem == -1), grp_resolution);
 	nm_set_item_text(m[convert_fixed_field_to_ni(fixed_field_index::opt_label_resolution)], "resolution:");
@@ -1211,7 +1252,7 @@ struct screen_resolution_menu : screen_resolution_menu_items, passive_newmenu
 	}
 	virtual window_event_result event_handler(const d_event &event) override;
 	void handle_close_event() const;
-#if SDL_MAJOR_VERSION == 1
+#if SDL_MAJOR_VERSION == 1 || defined(__ANDROID__)
 	void check_apply_preset_resolution() const;
 #endif
 	void apply_custom_resolution() const;
@@ -1233,7 +1274,7 @@ window_event_result screen_resolution_menu::event_handler(const d_event &event)
 void screen_resolution_menu::handle_close_event() const
 {
 	// check which resolution field was selected
-#if SDL_MAJOR_VERSION == 1
+#if SDL_MAJOR_VERSION == 1 || defined(__ANDROID__)
 	if (m[convert_fixed_field_to_ni(fixed_field_index::opt_checkbox_fullscreen)].value != gr_check_fullscreen())
 		gr_toggle_fullscreen();
 	if (!m[convert_fixed_field_to_ni(fixed_field_index::opt_radio_custom_values)].value)
@@ -1272,6 +1313,26 @@ void screen_resolution_menu::check_apply_preset_resolution() const
 	CGameCfg.AspectY = SM_W(requested_mode) / g;
 	CGameCfg.AspectX = SM_H(requested_mode) / g;
 	apply_resolution(requested_mode);
+}
+#elif defined(__ANDROID__)
+void screen_resolution_menu::check_apply_preset_resolution() const
+{
+	for (std::size_t idx = 0; idx < android_num_preset_modes; ++idx)
+	{
+		const auto &ni = m[static_cast<ni_index>(idx)];
+		if (ni.type != nm_type::radio)
+			continue;
+		if (ni.radio().group != grp_resolution)
+			continue;
+		if (!ni.value)
+			continue;
+		const auto requested_mode = android_preset_resolutions[idx].mode;
+		const auto g = gcd(SM_W(requested_mode), SM_H(requested_mode));
+		CGameCfg.AspectY = SM_W(requested_mode) / g;
+		CGameCfg.AspectX = SM_H(requested_mode) / g;
+		apply_resolution(requested_mode);
+		return;
+	}
 }
 #endif
 

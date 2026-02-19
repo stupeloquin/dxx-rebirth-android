@@ -745,6 +745,14 @@ int gr_set_mode(screen_mode mode)
 	ogl_tune_for_current();
 	sync_helper.init(CGameArg.OglSyncMethod, CGameArg.OglSyncWait);
 
+#ifdef __ANDROID__
+	{
+		int fb_w, fb_h;
+		SDL_GL_GetDrawableSize(g_pRebirthSDLMainWindow, &fb_w, &fb_h);
+		ogl_android_fb_w = fb_w;
+		ogl_android_fb_h = fb_h;
+	}
+#endif
 	OGL_VIEWPORT(0,0,w,h);
 	ogl_init_state();
 #ifdef __ANDROID__

@@ -122,6 +122,9 @@ namespace dcx {
 static std::unique_ptr<GLubyte[]> texbuf;
 
 unsigned last_width=~0u,last_height=~0u;
+#ifdef __ANDROID__
+unsigned ogl_android_fb_w, ogl_android_fb_h;
+#endif
 int GL_TEXTURE_2D_enabled=-1;
 
 static int r_texcount = 0, r_cachedtexcount = 0;

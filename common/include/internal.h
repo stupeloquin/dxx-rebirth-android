@@ -56,12 +56,35 @@ static constexpr GLfloat CPAL2Tb(const color_palette_index c)
 
 namespace dcx {
 extern unsigned last_width,last_height;
+#ifdef __ANDROID__
+/* On Android the EGL framebuffer is always at the device's native
+ * resolution.  The game's logical resolution (canvas) can be smaller.
+ * OGL_VIEWPORT keeps last_width/last_height at canvas dimensions so
+ * that coordinate normalisation throughout ogl.cpp stays correct, but
+ * calls glViewport with framebuffer-scaled values so rendering fills
+ * the whole screen.
+ */
+extern unsigned ogl_android_fb_w, ogl_android_fb_h;
+#endif
 static inline void OGL_VIEWPORT(const unsigned x, const unsigned y, const unsigned w, const unsigned h)
 {
 	if (w!=last_width || h!=last_height)
 	{
 		last_width = w;
 		last_height = h;
+#ifdef __ANDROID__
+		const unsigned scr_w = grd_curscreen->sc_canvas.cv_bitmap.bm_w;
+		const unsigned scr_h = grd_curscreen->sc_canvas.cv_bitmap.bm_h;
+		if (scr_w && scr_h && ogl_android_fb_w && ogl_android_fb_h)
+		{
+			const unsigned vp_x = x * ogl_android_fb_w / scr_w;
+			const unsigned vp_w = w * ogl_android_fb_w / scr_w;
+			const unsigned vp_h = h * ogl_android_fb_h / scr_h;
+			const unsigned vp_y_scaled = y * ogl_android_fb_h / scr_h;
+			glViewport(vp_x, ogl_android_fb_h - vp_y_scaled - vp_h, vp_w, vp_h);
+		}
+		else
+#endif
 		glViewport(x,grd_curscreen->sc_canvas.cv_bitmap.bm_h-y-h,w,h);
 	}
 }
