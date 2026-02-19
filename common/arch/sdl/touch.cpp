@@ -83,6 +83,7 @@ enum {
 static std::array<touch_zone, BTN_COUNT> buttons;
 static bool overlay_enabled = true;
 static bool overlay_initialized = false;
+static bool invert_y_axis = false;
 static bool controls_visible = true;
 static touch_zone toggle_button;
 static int screen_width, screen_height;
@@ -155,7 +156,7 @@ static void release_all_stick_keys(virtual_stick &stick)
 }
 
 // Compute stick deflection from current finger position
-static void compute_stick_deflection(virtual_stick &stick, float fx, float fy)
+static void compute_stick_deflection(virtual_stick &stick, float fx, float fy, bool invert_y = false)
 {
 	float ddx = (fx - stick.center_x) / (stick.radius / aspect_ratio);
 	float ddy = (fy - stick.center_y) / stick.radius;
@@ -163,6 +164,8 @@ static void compute_stick_deflection(virtual_stick &stick, float fx, float fy)
 	if (dist > 1.0f) { ddx /= dist; ddy /= dist; }
 	stick.dx = ddx;
 	stick.dy = ddy;
+	if (invert_y)
+		ddy = -ddy;
 	update_stick_keys(stick, ddx, ddy);
 }
 
@@ -631,7 +634,7 @@ int touch_overlay_handle_event(const SDL_Event &event)
 			// Right stick motion (+ dynamic fire zone transitions)
 			if (right_stick.active && right_stick.finger_id == fid)
 			{
-				compute_stick_deflection(right_stick, fx, fy);
+				compute_stick_deflection(right_stick, fx, fy, invert_y_axis);
 				update_fire_state(right_stick, fx, fy);
 				return 1;
 			}
@@ -690,6 +693,11 @@ void touch_overlay_set_enabled(bool enabled)
 bool touch_overlay_is_enabled()
 {
 	return overlay_enabled;
+}
+
+void touch_overlay_set_invert_y(bool invert)
+{
+	invert_y_axis = invert;
 }
 
 }  // namespace dcx

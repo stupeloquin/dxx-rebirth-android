@@ -91,6 +91,9 @@ struct CCfg : prohibit_void_ptr<CCfg>
 	ntstring<MISSION_NAME_LEN> LastMission;
 	ntstring<PATH_MAX - 1> CMLevelMusicPath;
 	enumerated_array<ntstring<PATH_MAX - 1>, 5, song_number> CMMiscMusic;
+#ifdef __ANDROID__
+	bool TouchInvertY;
+#endif
 };
 
 extern struct CCfg CGameCfg;

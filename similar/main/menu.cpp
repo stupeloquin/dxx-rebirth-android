@@ -84,6 +84,9 @@ COPYRIGHT 1993-1999 PARALLAX SOFTWARE CORPORATION.  ALL RIGHTS RESERVED.
 #include "ogl_extensions.h"
 #endif
 #include "physfs_list.h"
+#ifdef __ANDROID__
+#include "touch.h"
+#endif
 
 #include "dsx-ns.h"
 #include "compiler-range_for.h"
@@ -1599,6 +1602,12 @@ class input_config_menu_items
 #define DXX_INPUT_CONFIG_JOYSTICK_AXIS_ITEM(I)
 #endif
 
+#ifdef __ANDROID__
+#define DXX_ANDROID_TOUCH_ITEM(I)	I
+#else
+#define DXX_ANDROID_TOUCH_ITEM(I)
+#endif
+
 #define DXX_INPUT_CONFIG_MENU(VERB)	\
 	DXX_INPUT_CONFIG_JOYSTICK_ITEM(DXX_MENUITEM(VERB, CHECK, "Use joystick", opt_ic_usejoy, PlayerCfg.ControlType & CONTROL_USING_JOYSTICK))	\
 	DXX_MENUITEM(VERB, CHECK, "Use mouse", opt_ic_usemouse, PlayerCfg.ControlType & CONTROL_USING_MOUSE)	\
@@ -1618,6 +1627,7 @@ class input_config_menu_items
 	DXX_MENUITEM(VERB, TEXT, "", opt_label_blank_sensitivity_deadzone)	\
 	DXX_MENUITEM(VERB, CHECK, "Keep Keyboard/Mouse focus", opt_ic_grabinput, CGameCfg.Grabinput)	\
 	DXX_MENUITEM(VERB, CHECK, "Mouse FlightSim Indicator", opt_ic_mousefsgauge, PlayerCfg.MouseFSIndicator)	\
+	DXX_ANDROID_TOUCH_ITEM(DXX_MENUITEM(VERB, CHECK, "Invert touch look Y-axis", opt_ic_touch_invert_y, CGameCfg.TouchInvertY))	\
 	DXX_MENUITEM(VERB, TEXT, "", opt_label_blank_focus)	\
 	DXX_MENUITEM(VERB, TEXT, "When dead, respawn by pressing:", opt_label_respawn_mode)	\
 	DXX_MENUITEM(VERB, RADIO, "Any key", opt_respawn_any_key, PlayerCfg.RespawnMode == RespawnPress::Any, optgrp_respawn_mode)	\
@@ -1653,6 +1663,7 @@ public:
 		DXX_INPUT_CONFIG_MENU(ADD);
 	}
 #undef DXX_INPUT_CONFIG_MENU
+#undef DXX_ANDROID_TOUCH_ITEM
 #undef DXX_INPUT_CONFIG_JOYSTICK_AXIS_ITEM
 #undef DXX_INPUT_CONFIG_JOYSTICK_ITEM
 };
@@ -1728,6 +1739,13 @@ window_event_result input_config_menu::event_handler(const d_event &event)
 				else
 					PlayerCfg.PitchLockFlags &= ~pitchlock;
 			}
+#ifdef __ANDROID__
+			else if (citem == opt_ic_touch_invert_y)
+			{
+				CGameCfg.TouchInvertY = items[citem].value;
+				touch_overlay_set_invert_y(CGameCfg.TouchInvertY);
+			}
+#endif
 
 			break;
 		}
