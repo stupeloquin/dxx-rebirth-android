@@ -84,6 +84,7 @@ static std::array<touch_zone, BTN_COUNT> buttons;
 static bool overlay_enabled = true;
 static bool overlay_initialized = false;
 static bool invert_y_axis = false;
+static bool in_game = false;
 static bool controls_visible = true;
 static touch_zone toggle_button;
 static int screen_width, screen_height;
@@ -520,7 +521,16 @@ void touch_overlay_draw()
 			// Try textured rendering if we have a real (non-placeholder) icon
 			if (button_textures[i] && !button_texture_is_placeholder[i])
 			{
-				draw_textured_rect(b.x, b.y, b.w, b.h, button_textures[i], alpha + 0.3f);
+				// Fit a square icon inside the button rect, centered.
+				// Convert w/h to pixel space to compare, then back.
+				float pw = b.w * aspect_ratio;  // pixel-proportional width
+				float ph = b.h;                 // pixel-proportional height
+				float side = (pw < ph) ? pw : ph;  // square side in pixel space
+				float iw = side / aspect_ratio; // back to normalized x
+				float ih = side;                // normalized y
+				float ix = b.x + (b.w - iw) * 0.5f;
+				float iy = b.y + (b.h - ih) * 0.5f;
+				draw_textured_rect(ix, iy, iw, ih, button_textures[i], alpha + 0.3f);
 			}
 			else
 			{
@@ -634,7 +644,7 @@ int touch_overlay_handle_event(const SDL_Event &event)
 			// Right stick motion (+ dynamic fire zone transitions)
 			if (right_stick.active && right_stick.finger_id == fid)
 			{
-				compute_stick_deflection(right_stick, fx, fy, invert_y_axis);
+				compute_stick_deflection(right_stick, fx, fy, invert_y_axis && in_game);
 				update_fire_state(right_stick, fx, fy);
 				return 1;
 			}
@@ -698,6 +708,11 @@ bool touch_overlay_is_enabled()
 void touch_overlay_set_invert_y(bool invert)
 {
 	invert_y_axis = invert;
+}
+
+void touch_overlay_set_in_game(bool ig)
+{
+	in_game = ig;
 }
 
 }  // namespace dcx
