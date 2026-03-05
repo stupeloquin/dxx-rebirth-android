@@ -153,15 +153,7 @@ KCONFIG_OUTPUT=$ANDROID_PROJECT/app/jni/src/kconfig.udlr.h
 
 if [ ! -f $KCONFIG_OUTPUT ] || [ $KCONFIG_SRC -nt $KCONFIG_OUTPUT ]; then
     KCONFIG_I=/tmp/kconfig.ui-table.i
-    if command -v g++ &> /dev/null; then
-        CXX_CMD=g++
-    elif command -v c++ &> /dev/null; then
-        CXX_CMD=c++
-    else
-        echo "No host C++ compiler found, installing..."
-        apt-get update -qq && apt-get install -y -qq g++ > /dev/null 2>&1
-        CXX_CMD=g++
-    fi
+    CXX_CMD=g++
 
     $CXX_CMD -E -std=c++20 \
         -DDXX_BUILD_DESCENT=1 \
@@ -188,10 +180,9 @@ echo "=== Compiling Vulkan shaders ==="
 SHADER_DIR=$DXX_ROOT/similar/arch/vk/shaders
 SHADER_OUT=$ANDROID_PROJECT/app/jni/src
 
-# Install glslangValidator if not present
 if ! command -v glslangValidator &> /dev/null; then
-    echo "Installing glslang-tools..."
-    apt-get update -qq && apt-get install -y -qq glslang-tools > /dev/null 2>&1
+    echo "ERROR: glslangValidator not found. Rebuild Docker image with glslang-tools."
+    exit 1
 fi
 
 # Function to compile a shader to a C header with embedded SPIR-V
@@ -289,7 +280,19 @@ android {
         }
     }
 
+    signingConfigs {
+        debug {
+            storeFile file("../debug.keystore")
+            storePassword "android"
+            keyAlias "androiddebugkey"
+            keyPassword "android"
+        }
+    }
+
     buildTypes {
+        debug {
+            signingConfig signingConfigs.debug
+        }
         release {
             minifyEnabled false
         }
