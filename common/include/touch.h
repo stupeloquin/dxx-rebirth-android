@@ -20,6 +20,7 @@ int touch_overlay_handle_event(const SDL_Event &event);
 void touch_overlay_set_enabled(bool enabled);
 bool touch_overlay_is_enabled();
 void touch_overlay_set_invert_y(bool invert);
+void touch_overlay_set_in_game(bool in_game);
 
 }
 

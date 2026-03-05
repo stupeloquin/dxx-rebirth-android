@@ -112,6 +112,9 @@ COPYRIGHT 1993-1999 PARALLAX SOFTWARE CORPORATION.  ALL RIGHTS RESERVED.
 #include "editor/esegment.h"
 #endif
 
+#ifdef __ANDROID__
+#include "touch.h"
+#endif
 #include "d_construct.h"
 #include "d_enumerate.h"
 #include "d_levelstate.h"
@@ -1776,6 +1779,9 @@ window_event_result game_window::event_handler(const d_event &event)
 			event_toggle_focus(1);
 			key_toggle_repeat(0);
 			game_flush_inputs(Controls);
+#ifdef __ANDROID__
+			touch_overlay_set_in_game(true);
+#endif
 
 			if (time_paused)
 				start_time();
@@ -1790,6 +1796,9 @@ window_event_result game_window::event_handler(const d_event &event)
 			break;
 
 		case event_type::window_deactivated:
+#ifdef __ANDROID__
+			touch_overlay_set_in_game(false);
+#endif
 			if (!((+(Game_mode & GM_MULTI) && (Newdemo_state != ND_STATE_PLAYBACK)) && (!Endlevel_sequence)) )
 				stop_time();
 
