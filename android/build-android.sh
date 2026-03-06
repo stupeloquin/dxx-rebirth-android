@@ -406,7 +406,7 @@ cat > $ANDROID_PROJECT/app/src/main/AndroidManifest.xml << 'MANIFESTEOF'
 
     <application
         android:allowBackup="true"
-        android:icon="@mipmap/ic_launcher"
+        android:icon="@mipmap/PLACEHOLDER_ICON"
         android:label="PLACEHOLDER_LABEL"
         android:hasCode="true"
         android:hardwareAccelerated="true"
@@ -425,17 +425,10 @@ cat > $ANDROID_PROJECT/app/src/main/AndroidManifest.xml << 'MANIFESTEOF'
 </manifest>
 MANIFESTEOF
 
+DXX_ICON=$( [ "$DXX_GAME" = "d2x" ] && echo "ic_launcher_d2" || echo "ic_launcher" )
 sed -i "s/PLACEHOLDER_LABEL/$DXX_LABEL/" $ANDROID_PROJECT/app/src/main/AndroidManifest.xml
 sed -i "s/PLACEHOLDER_PACKAGE/$DXX_PACKAGE/g" $ANDROID_PROJECT/app/src/main/AndroidManifest.xml
-
-# Use D2X icon if building Descent 2
-if [ "$DXX_GAME" = "d2x" ]; then
-    for dir in $ANDROID_PROJECT/app/src/main/res/mipmap-*; do
-        if [ -f "$dir/ic_launcher_d2.png" ]; then
-            cp "$dir/ic_launcher_d2.png" "$dir/ic_launcher.png"
-        fi
-    done
-fi
+sed -i "s/PLACEHOLDER_ICON/$DXX_ICON/" $ANDROID_PROJECT/app/src/main/AndroidManifest.xml
 
 # Copy SDL2 Java source files
 mkdir -p $ANDROID_PROJECT/app/src/main/java/org/libsdl/app
