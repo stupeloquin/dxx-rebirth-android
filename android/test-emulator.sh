@@ -4,6 +4,8 @@ set -e
 export ANDROID_HOME=/opt/android-sdk
 export PATH="$ANDROID_HOME/emulator:$ANDROID_HOME/platform-tools:$PATH"
 
+DXX_PACKAGE=${DXX_PACKAGE:-com.dxxrebirth.d1x}
+
 echo "=== Starting Android Emulator (headless) ==="
 
 # Start emulator in background, no window, no audio, no boot animation
@@ -49,16 +51,16 @@ echo "=== Installing APK ==="
 adb install /build/dxx-android/app/build/outputs/apk/debug/app-debug.apk
 
 echo "=== Launching App ==="
-adb shell am start -n com.dxxrebirth.d1x/org.libsdl.app.SDLActivity
+adb shell am start -n $DXX_PACKAGE/org.libsdl.app.SDLActivity
 
 # Wait for app to start
 sleep 10
 
 echo "=== Checking logcat ==="
-adb logcat -d -s "SDL" "SDL/APP" "D1X" "libSDL" "SDLActivity" "DEBUG" "AndroidRuntime" | tail -100
+adb logcat -d -s "SDL" "SDL/APP" "D1X" "D2X" "libSDL" "SDLActivity" "DEBUG" "AndroidRuntime" | tail -100
 
 echo "=== Checking if app process is running ==="
-adb shell ps | grep -i "dxxrebirth\|sdl\|d1x" || echo "App process not found (may have crashed)"
+adb shell ps | grep -i "dxxrebirth\|sdl\|d1x\|d2x" || echo "App process not found (may have crashed)"
 
 echo "=== Full crash logs (if any) ==="
 adb logcat -d | grep -E "FATAL|AndroidRuntime|signal|SIGSEGV|SIGABRT|SDL|libmain" | tail -50
