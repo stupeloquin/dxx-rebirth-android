@@ -1618,7 +1618,26 @@ window_event_result netgame_list_game_menu::event_handler(const d_event &event)
 	net_udp_listen();
 
 	if (!num_active_udp_changed && !newpage)
+	{
+		// Add selection indicator: prepend ">" before the number on current item
+		const auto ci = citem - header_rows;
+		if (ci >= 0 && ci < static_cast<int>(ljtext.size()))
+		{
+			auto &p = ljtext[ci];
+			// Shift text right by 1 to make room for ">"
+			const auto len = strlen(p.data());
+			if (len + 1 < p.size())
+			{
+				memmove(&p[1], &p[0], len + 1);
+				p[0] = '>';
+				const auto r = newmenu::event_handler(event);
+				// Restore: shift back left by 1
+				memmove(&p[0], &p[1], len + 1);
+				return r;
+			}
+		}
 		return newmenu::event_handler(event);
+	}
 
 	num_active_udp_changed = 0;
 
