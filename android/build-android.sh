@@ -27,6 +27,20 @@ ANDROID_PROJECT=/build/dxx-android
 DEPS=/build/dxx-android/deps
 
 # ============================================================
+# Game selection: d1x (Descent 1) or d2x (Descent 2)
+# ============================================================
+DXX_GAME=${DXX_GAME:-d1x}
+case "$DXX_GAME" in
+    d1x) DXX_BUILD_NUM=1; DXX_PACKAGE="com.dxxrebirth.d1x"
+         DXX_LABEL="D1X-Rebirth"; DXX_SRCDIR="d1x-rebirth" ;;
+    d2x) DXX_BUILD_NUM=2; DXX_PACKAGE="com.dxxrebirth.d2x"
+         DXX_LABEL="D2X-Rebirth"; DXX_SRCDIR="d2x-rebirth" ;;
+    *)   echo "ERROR: DXX_GAME must be 'd1x' or 'd2x'"; exit 1 ;;
+esac
+DXX_PACKAGE_PATH=$(echo "$DXX_PACKAGE" | tr '.' '/')
+echo "=== Building $DXX_LABEL (DXX_GAME=$DXX_GAME) ==="
+
+# ============================================================
 # Step 1: Download dependencies
 # ============================================================
 echo "=== Downloading dependencies ==="
@@ -144,6 +158,14 @@ else
 fi
 
 # ============================================================
+# Step 3c: Update dxxsconf.h for selected game
+# ============================================================
+DXXSCONF=$ANDROID_PROJECT/app/jni/src/dxxsconf.h
+if [ -f "$DXXSCONF" ]; then
+    sed -i "s/^#define DXX_BUILD_DESCENT .*/#define DXX_BUILD_DESCENT $DXX_BUILD_NUM/" "$DXXSCONF"
+fi
+
+# ============================================================
 # Step 4: Generate kconfig.udlr.h
 # ============================================================
 echo "=== Generating kconfig.udlr.h ==="
@@ -151,23 +173,32 @@ KCONFIG_SRC=$DXX_ROOT/similar/main/kconfig.ui-table.cpp
 KCONFIG_GEN=$DXX_ROOT/similar/main/generate-kconfig-udlr.py
 KCONFIG_OUTPUT=$ANDROID_PROJECT/app/jni/src/kconfig.udlr.h
 
+KCONFIG_GAME_MARKER=$ANDROID_PROJECT/app/jni/src/.kconfig_game
+KCONFIG_STALE=false
 if [ ! -f $KCONFIG_OUTPUT ] || [ $KCONFIG_SRC -nt $KCONFIG_OUTPUT ]; then
+    KCONFIG_STALE=true
+elif [ ! -f "$KCONFIG_GAME_MARKER" ] || [ "$(cat "$KCONFIG_GAME_MARKER")" != "$DXX_GAME" ]; then
+    KCONFIG_STALE=true
+fi
+
+if [ "$KCONFIG_STALE" = true ]; then
     KCONFIG_I=/tmp/kconfig.ui-table.i
     CXX_CMD=g++
 
     $CXX_CMD -E -std=c++20 \
-        -DDXX_BUILD_DESCENT=1 \
+        -DDXX_BUILD_DESCENT=$DXX_BUILD_NUM \
         -DDXX_KCONFIG_UI_ENUM=DXX_KCONFIG_UI_ENUM \
         -DDXX_KCONFIG_UI_LABEL=DXX_KCONFIG_UI_LABEL \
         -Dkc_item=kc_item \
         -I$ANDROID_PROJECT/app/jni/src \
         -I$DXX_ROOT/common/include \
         -I$DXX_ROOT/common/main \
-        -I$DXX_ROOT/d1x-rebirth/main \
+        -I$DXX_ROOT/$DXX_SRCDIR/main \
         -I$DXX_ROOT \
         $KCONFIG_SRC > $KCONFIG_I
 
     python3 $KCONFIG_GEN $KCONFIG_I $KCONFIG_OUTPUT
+    echo "$DXX_GAME" > "$KCONFIG_GAME_MARKER"
     echo "Generated $KCONFIG_OUTPUT"
 else
     echo "kconfig.udlr.h already generated, skipping"
@@ -256,12 +287,12 @@ plugins {
 }
 
 android {
-    namespace "com.dxxrebirth.d1x"
+    namespace "PLACEHOLDER_PACKAGE"
     compileSdk 34
     ndkVersion "26.1.10909125"
 
     defaultConfig {
-        applicationId "com.dxxrebirth.d1x"
+        applicationId "PLACEHOLDER_PACKAGE"
         minSdk 24
         targetSdk 34
         versionCode 1
@@ -320,6 +351,7 @@ dependencies {
 }
 BUILDEOF
 sed -i "s/PLACEHOLDER_ABI/${TARGET_ABI:-x86_64}/" $ANDROID_PROJECT/app/build.gradle
+sed -i "s/PLACEHOLDER_PACKAGE/$DXX_PACKAGE/g" $ANDROID_PROJECT/app/build.gradle
 
 # Write top-level build.gradle
 cat > $ANDROID_PROJECT/build.gradle << 'TOPBUILDEOF'
@@ -375,12 +407,12 @@ cat > $ANDROID_PROJECT/app/src/main/AndroidManifest.xml << 'MANIFESTEOF'
     <application
         android:allowBackup="true"
         android:icon="@mipmap/ic_launcher"
-        android:label="D1X-Rebirth"
+        android:label="PLACEHOLDER_LABEL"
         android:hasCode="true"
         android:hardwareAccelerated="true"
         android:requestLegacyExternalStorage="true">
         <activity
-            android:name="com.dxxrebirth.d1x.DxxActivity"
+            android:name="PLACEHOLDER_PACKAGE.DxxActivity"
             android:configChanges="keyboard|keyboardHidden|orientation|screenSize|screenLayout|uiMode"
             android:screenOrientation="sensorLandscape"
             android:exported="true">
@@ -393,15 +425,29 @@ cat > $ANDROID_PROJECT/app/src/main/AndroidManifest.xml << 'MANIFESTEOF'
 </manifest>
 MANIFESTEOF
 
+sed -i "s/PLACEHOLDER_LABEL/$DXX_LABEL/" $ANDROID_PROJECT/app/src/main/AndroidManifest.xml
+sed -i "s/PLACEHOLDER_PACKAGE/$DXX_PACKAGE/g" $ANDROID_PROJECT/app/src/main/AndroidManifest.xml
+
+# Use D2X icon if building Descent 2
+if [ "$DXX_GAME" = "d2x" ]; then
+    for dir in $ANDROID_PROJECT/app/src/main/res/mipmap-*; do
+        if [ -f "$dir/ic_launcher_d2.png" ]; then
+            cp "$dir/ic_launcher_d2.png" "$dir/ic_launcher.png"
+        fi
+    done
+fi
+
 # Copy SDL2 Java source files
 mkdir -p $ANDROID_PROJECT/app/src/main/java/org/libsdl/app
 cp $DEPS/SDL2-2.30.10/android-project/app/src/main/java/org/libsdl/app/*.java \
    $ANDROID_PROJECT/app/src/main/java/org/libsdl/app/
 
 # Copy DxxActivity.java (SDLActivity subclass for storage permission)
-mkdir -p $ANDROID_PROJECT/app/src/main/java/com/dxxrebirth/d1x
+mkdir -p $ANDROID_PROJECT/app/src/main/java/$DXX_PACKAGE_PATH
 cp $DXX_ROOT/android/DxxActivity.java \
-   $ANDROID_PROJECT/app/src/main/java/com/dxxrebirth/d1x/DxxActivity.java
+   $ANDROID_PROJECT/app/src/main/java/$DXX_PACKAGE_PATH/DxxActivity.java
+sed -i "s/^package com\.dxxrebirth\.d1x;/package $DXX_PACKAGE;/" \
+   $ANDROID_PROJECT/app/src/main/java/$DXX_PACKAGE_PATH/DxxActivity.java
 
 # ============================================================
 # Step 6: Set up the CMake build to find SDL2 and SDL2_mixer properly
@@ -413,7 +459,7 @@ cp $DXX_ROOT/android/DxxActivity.java \
 
 cat > $ANDROID_PROJECT/app/jni/src/CMakeLists.txt << 'CMAKEOF'
 cmake_minimum_required(VERSION 3.28)
-project(d1x-rebirth C CXX)
+project(PLACEHOLDER_PROJECT C CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -551,7 +597,6 @@ set(DXX_SIMILAR_SOURCES
     ${DXX_SRC_ROOT}/similar/main/aipath.cpp
     ${DXX_SRC_ROOT}/similar/main/automap.cpp
     ${DXX_SRC_ROOT}/similar/main/bm.cpp
-    ${DXX_SRC_ROOT}/similar/main/bmread.cpp
     ${DXX_SRC_ROOT}/similar/main/cntrlcen.cpp
     ${DXX_SRC_ROOT}/similar/main/collide.cpp
     ${DXX_SRC_ROOT}/similar/main/config.cpp
@@ -619,12 +664,9 @@ set(DXX_SIMILAR_SOURCES
 )
 
 # --------------------------------------------------------------------------
-# Source files - D1X-specific
+# Source files - Game-specific
 # --------------------------------------------------------------------------
-set(DXX_D1X_SOURCES
-    ${DXX_SRC_ROOT}/d1x-rebirth/main/custom.cpp
-    ${DXX_SRC_ROOT}/d1x-rebirth/main/snddecom.cpp
-)
+GAME_SOURCES_PLACEHOLDER
 
 # --------------------------------------------------------------------------
 # Build as shared library (libmain.so) for SDL2 Android
@@ -633,7 +675,7 @@ add_library(main SHARED
     ${DXX_LIBRARY_SOURCES}
     ${DXX_COMMON_SOURCES}
     ${DXX_SIMILAR_SOURCES}
-    ${DXX_D1X_SOURCES}
+    ${DXX_GAME_SOURCES}
     ${CMAKE_CURRENT_SOURCE_DIR}/build_env_stubs.cpp
 )
 
@@ -646,7 +688,7 @@ target_include_directories(main PRIVATE
     # DXX-Rebirth include paths (matches SConstruct CPPPATH)
     ${DXX_SRC_ROOT}/common/include
     ${DXX_SRC_ROOT}/common/main
-    ${DXX_SRC_ROOT}/d1x-rebirth/main
+    GAME_INCLUDE_PLACEHOLDER
     ${DXX_SRC_ROOT}
     # Dependencies
     ${SDL2_SOURCE_DIR}/include
@@ -658,8 +700,8 @@ target_include_directories(main PRIVATE
 # Compile definitions
 # --------------------------------------------------------------------------
 target_compile_definitions(main PRIVATE
-    # Descent 1 build
-    DXX_BUILD_DESCENT=1
+    # Descent game build number
+    DXX_BUILD_DESCENT=PLACEHOLDER_BUILD_NUM
     # PhysFS deprecation warnings
     PHYSFS_DEPRECATED=
     # PRIi64 etc.
@@ -702,6 +744,36 @@ target_link_libraries(main PRIVATE
     m
 )
 CMAKEOF
+
+# Substitute CMakeLists.txt placeholders
+CMAKELISTS=$ANDROID_PROJECT/app/jni/src/CMakeLists.txt
+sed -i "s/PLACEHOLDER_PROJECT/${DXX_GAME}-rebirth/" "$CMAKELISTS"
+sed -i "s/PLACEHOLDER_BUILD_NUM/$DXX_BUILD_NUM/" "$CMAKELISTS"
+
+if [ "$DXX_GAME" = "d2x" ]; then
+    D2X_SOURCES='set(DXX_GAME_SOURCES\
+    ${DXX_SRC_ROOT}/d2x-rebirth/libmve/decoder8.cpp\
+    ${DXX_SRC_ROOT}/d2x-rebirth/libmve/decoder16.cpp\
+    ${DXX_SRC_ROOT}/d2x-rebirth/libmve/mve_audio.cpp\
+    ${DXX_SRC_ROOT}/d2x-rebirth/libmve/mvelib.cpp\
+    ${DXX_SRC_ROOT}/d2x-rebirth/libmve/mveplay.cpp\
+    ${DXX_SRC_ROOT}/d2x-rebirth/main/escort.cpp\
+    ${DXX_SRC_ROOT}/d2x-rebirth/main/gamepal.cpp\
+    ${DXX_SRC_ROOT}/d2x-rebirth/main/movie.cpp\
+)'
+    D2X_INCLUDES='${DXX_SRC_ROOT}/d2x-rebirth/main\
+    ${DXX_SRC_ROOT}/d2x-rebirth/libmve'
+    sed -i "s|GAME_SOURCES_PLACEHOLDER|$D2X_SOURCES|" "$CMAKELISTS"
+    sed -i "s|GAME_INCLUDE_PLACEHOLDER|$D2X_INCLUDES|" "$CMAKELISTS"
+else
+    D1X_SOURCES='set(DXX_GAME_SOURCES\
+    ${DXX_SRC_ROOT}/d1x-rebirth/main/custom.cpp\
+    ${DXX_SRC_ROOT}/d1x-rebirth/main/snddecom.cpp\
+    ${DXX_SRC_ROOT}/similar/main/bmread.cpp\
+)'
+    sed -i "s|GAME_SOURCES_PLACEHOLDER|$D1X_SOURCES|" "$CMAKELISTS"
+    sed -i "s|GAME_INCLUDE_PLACEHOLDER|\${DXX_SRC_ROOT}/d1x-rebirth/main|" "$CMAKELISTS"
+fi
 
 # ============================================================
 # Step 7: Set up Gradle wrapper from SDL2 template

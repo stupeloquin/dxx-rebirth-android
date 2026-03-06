@@ -2951,7 +2951,7 @@ void multi_send_door_open_specific(const playernum_t pnum, const vcsegidx_t segn
 {
 	// For sending doors only to a specific person (usually when they're joining)
 
-	Assert (Game_mode & GM_NETWORK);
+	Assert (+(Game_mode & GM_NETWORK));
 	//   Assert (pnum>-1 && pnum<N_players);
 
 	multi_command<multiplayer_command_t::MULTI_DOOR_OPEN> multibuf;
@@ -4034,7 +4034,7 @@ void multi_send_wall_status_specific(const playernum_t pnum, wallnum_t wallnum, 
 
 	int count{0};
 
-	Assert (Game_mode & GM_NETWORK);
+	Assert (+(Game_mode & GM_NETWORK));
 	//Assert (pnum>-1 && pnum<N_players);
 
 	count++;
@@ -4195,7 +4195,7 @@ void multi_send_light_specific (const playernum_t pnum, const vcsegptridx_t segn
 {
 	int count{1};
 
-	Assert (Game_mode & GM_NETWORK);
+	Assert (+(Game_mode & GM_NETWORK));
 	//  Assert (pnum>-1 && pnum<N_players);
 
 	multi_command<multiplayer_command_t::MULTI_LIGHT> multibuf;
