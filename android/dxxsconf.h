@@ -20,8 +20,10 @@
 /* SDL2_mixer for audio */
 #define DXX_USE_SDLMIXER 1
 
-/* No SDL_image */
-#define DXX_USE_SDLIMAGE 0
+/* SDL_image: Rebirth loads PCX and PNG through it, so without it every
+ * background (the Interplay logo, the menu backdrops) falls back to
+ * pcx_read_blank() - a blank bitmap with a white border. */
+#define DXX_USE_SDLIMAGE 1
 
 /* No level editor */
 #define DXX_USE_EDITOR 0
