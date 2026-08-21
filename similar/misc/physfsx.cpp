@@ -236,21 +236,6 @@ bool PHYSFSX_init(int argc, char *argv[])
 		con_printf(CON_DEBUG, "PHYSFS: mounting Android game directory \"%s\"", game_path);
 		PHYSFS_mount(game_path, nullptr, 1);
 	}
-	if (const auto user_files{getenv("USER_FILES")})
-	{
-		char write_dir[PATH_MAX];
-
-		snprintf(write_dir, sizeof(write_dir), "%s/%s", user_files, DXX_ANDROID_USER_DIR);
-		PHYSFS_setWriteDir(write_dir);
-		if (!PHYSFS_getWriteDir())
-		{
-			PHYSFS_setWriteDir(user_files);
-			PHYSFS_mkdir(DXX_ANDROID_USER_DIR);
-			PHYSFS_setWriteDir(write_dir);
-		}
-		if (PHYSFS_getWriteDir())
-			PHYSFS_mount(write_dir, nullptr, 0);
-	}
 #endif
 
 	setup_final_fallback_write_directory(base_dir);
