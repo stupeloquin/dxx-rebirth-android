@@ -173,13 +173,35 @@ static void setup_osx_resource_path()
 }
 #endif
 
+#ifdef __ANDROID__
+#include <jni.h>
+#include <SDL_system.h>
+#endif
+
 // Initialise PhysicsFS, set up basic search paths and add arguments from .ini file.
 // The .ini file can be in either the user directory or the same directory as the program.
 // The user directory is searched first.
 bool PHYSFSX_init(int argc, char *argv[])
 {
+#ifdef __ANDROID__
+	{
+		/* PhysFS reads argv0 as a PHYSFS_AndroidInit * on Android. */
+		const auto jactivity{static_cast<jobject>(SDL_AndroidGetActivity())};
+		PHYSFS_AndroidInit ainit{SDL_AndroidGetJNIEnv(), jactivity};
+
+		if (!PHYSFS_init(reinterpret_cast<const char *>(&ainit)))
+			Error("Failed to init PhysFS: %s", PHYSFS_getLastError());
+
+		if (jactivity)
+		{
+			const auto jenv{static_cast<JNIEnv *>(ainit.jnienv)};
+			jenv->DeleteLocalRef(jactivity);
+		}
+	}
+#else
 	if (!PHYSFS_init(argv[0]))
 		Error("Failed to init PhysFS: %s", PHYSFS_getLastError());
+#endif
 	PHYSFS_permitSymbolicLinks(1);
 	const auto base_dir{PHYSFS_getBaseDir()};
 #if (defined(__APPLE__) && defined(__MACH__))	// others?
@@ -207,6 +229,29 @@ bool PHYSFSX_init(int argc, char *argv[])
 	if (!InitArgs(std::span(argv, argc).template subspan<1>()))
 		return false;
 	PHYSFS_unmount(base_dir);
+
+#ifdef __ANDROID__
+	if (const auto game_path{getenv("HOME")})
+	{
+		con_printf(CON_DEBUG, "PHYSFS: mounting Android game directory \"%s\"", game_path);
+		PHYSFS_mount(game_path, nullptr, 1);
+	}
+	if (const auto user_files{getenv("USER_FILES")})
+	{
+		char write_dir[PATH_MAX];
+
+		snprintf(write_dir, sizeof(write_dir), "%s/%s", user_files, DXX_ANDROID_USER_DIR);
+		PHYSFS_setWriteDir(write_dir);
+		if (!PHYSFS_getWriteDir())
+		{
+			PHYSFS_setWriteDir(user_files);
+			PHYSFS_mkdir(DXX_ANDROID_USER_DIR);
+			PHYSFS_setWriteDir(write_dir);
+		}
+		if (PHYSFS_getWriteDir())
+			PHYSFS_mount(write_dir, nullptr, 0);
+	}
+#endif
 
 	setup_final_fallback_write_directory(base_dir);
 	setup_hogdir_path();

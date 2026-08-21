@@ -86,7 +86,15 @@ struct enumerated_array :
 	 * are done, by providing an explicitly deleted overload that matches
 	 * integers.
 	 */
-	const_reference operator[](std::integral auto) const = delete;
+	/* When `E` is itself an integral type (objnum_t is `uint16_t`, for
+	 * instance), this deleted overload is an exact match for the same argument
+	 * as `operator[](this auto &, E)` above. gcc picks the non-deleted one;
+	 * clang calls it ambiguous. Excluding `E` keeps the intent - reject *other*
+	 * integer types - and builds on both.
+	 */
+	template <typename I>
+		requires(std::integral<I> && !std::is_same<I, E>::value)
+	const_reference operator[](I) const = delete;
 	using operations_type::valid_index;
 };
 

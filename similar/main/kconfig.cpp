@@ -44,6 +44,9 @@ COPYRIGHT 1993-1999 PARALLAX SOFTWARE CORPORATION.  ALL RIGHTS RESERVED.
 #include "gamefont.h"
 #include "u_mem.h"
 #include "kconfig.h"
+#ifdef __ANDROID__
+#include "touch_input.h"
+#endif
 #include "digi.h"
 #include "key.h"
 #include "mouse.h"
@@ -1842,6 +1845,9 @@ void kconfig_read_controls(control_info &Controls, const d_event &event, int aut
 
 void kconfig_end_loop(control_info &Controls, const fix frametime)
 {
+#ifdef __ANDROID__
+	dxx_touch_apply_controls();
+#endif
 	static constexpr unsigned FREE_PITCH_FACTOR{1};
 	static constexpr unsigned LOCKED_PITCH_FACTOR{2};
 #if DXX_MAX_AXES_PER_JOYSTICK

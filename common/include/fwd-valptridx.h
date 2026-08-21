@@ -224,6 +224,9 @@ public:
 		class magic_constant
 		{
 		public:
+			/* Lets the factory overloads below exclude magic constants from
+			 * their generic index_type candidate; see valptridx.h. */
+			using dxx_magic_constant_tag = void;
 			constexpr operator index_type() const { return constant; }
 		};
 };

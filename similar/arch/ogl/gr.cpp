@@ -54,7 +54,7 @@
 #if defined(__APPLE__) && defined(__MACH__)
 #include <OpenGL/glu.h>
 #else
-#if DXX_USE_OGLES
+#if DXX_USE_OGLES && SDL_MAJOR_VERSION == 1
 #include <EGL/egl.h>
 #include <X11/Xlib.h>
 #include <X11/Xutil.h>
@@ -853,6 +853,12 @@ int gr_init()
 		sdl_window_flags |= SDL_WINDOW_FULLSCREEN_DESKTOP;
 #if defined(__APPLE__) && defined(__MACH__)
 	sdl_window_flags |= SDL_WINDOW_ALLOW_HIGHDPI;
+#endif
+#if DXX_USE_OGLES
+	SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK, SDL_GL_CONTEXT_PROFILE_ES);
+	SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 1);
+	SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, 1);
+	SDL_GL_SetAttribute(SDL_GL_DEPTH_SIZE, 16);
 #endif
 	const auto mode{Game_screen_mode};
 	const auto SDLWindow = SDL_CreateWindow(DESCENT_VERSION, SDL_WINDOWPOS_UNDEFINED, SDL_WINDOWPOS_UNDEFINED, SM_W(mode), SM_H(mode), sdl_window_flags);

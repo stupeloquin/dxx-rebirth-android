@@ -776,7 +776,15 @@ static int main(int argc, char *argv[])
 
 }
 
+/* Android has no process entry point of its own: the OpenTouch JNI layer calls
+ * dxx_main() from PortableInit(). Renaming the definition rather than
+ * #define-ing main leaves the dsx::main() call below untouched. */
+#ifdef __ANDROID__
+extern "C" int dxx_main(int argc, char *argv[]);
+extern "C" int dxx_main(int argc, char *argv[])
+#else
 int main(int argc, char *argv[])
+#endif
 {
 	mem_init();
 #if DXX_WORDS_NEED_ALIGNMENT

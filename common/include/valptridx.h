@@ -1067,7 +1067,15 @@ public:
 	{
 		return self.array_base_storage_type::operator[](n);
 	}
-	void operator[](this auto &, auto) = delete;
+	/* clang 19 cannot partially order two `this auto &` overloads, so the
+	 * catch-all deleted one below is ambiguous with the concrete one above
+	 * rather than losing to it as it does under gcc. Excluding the real index
+	 * type keeps the intent - reject every *other* argument type - and builds
+	 * with both compilers.
+	 */
+	template <typename I>
+		requires(!std::is_same<std::remove_cvref_t<I>, index_type>::value)
+	void operator[](this auto &, I) = delete;
 #if DXX_HAVE_POISON_UNDEFINED
 	array_managed_type();
 #else
@@ -1132,10 +1140,20 @@ public:
 			propagate_const<Self, basic_ival_member_factory> &base{self};
 			return guarded<P>{P{i, base.get_array(), assume_nothrow_index{}}};
 		}
-	void check_untrusted(this auto &self, auto &&i) = delete;
+	/* Same clang 19 partial-ordering limitation as operator[] below: exclude
+	 * the type the real overload takes so exactly one candidate remains. */
+	template <typename I>
+		requires(!std::is_same<std::remove_cvref_t<I>, index_type>::value)
+	void check_untrusted(this auto &self, I &&i) = delete;
+	/* The magic_constant overload below is the more specialised of the two, but
+	 * clang 19 cannot partially order `this auto &` overloads and reports the
+	 * call as ambiguous. Excluding magic constants here leaves exactly one
+	 * candidate, which is the one gcc would have chosen anyway.
+	 */
 	template <typename Self, typename index_type, typename P = Pmc<Self>>
 		requires(
-			std::constructible_from<typename P::index_type, index_type>
+			std::constructible_from<typename P::index_type, index_type> &&
+			!requires { typename std::remove_cvref_t<index_type>::dxx_magic_constant_tag; }
 		)
 		[[nodiscard]]
 		auto operator()(this Self &self, index_type &&i DXX_VALPTRIDX_REPORT_STANDARD_LEADER_COMMA_L_DECL_VARS)
