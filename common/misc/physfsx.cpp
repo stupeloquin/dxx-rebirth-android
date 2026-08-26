@@ -13,6 +13,7 @@
 #include "ignorecase.h"
 #include "newdemo.h"
 #include "physfs_list.h"
+#include <cctype>
 #include "physfsx.h"
 #include "strutil.h"
 
@@ -374,6 +375,32 @@ std::pair<RAIIPHYSFS_File, PHYSFS_ErrorCode> PHYSFSX_openWriteBuffered(const cha
 	return {std::move(fp), PHYSFS_ERR_OK};
 }
 
+/*
+ * Whether an add-on archive belongs to the other game.
+ *
+ * Both games are played out of one folder in this port, which upstream never
+ * has to deal with - there, each game has a directory of its own. The
+ * soundtrack packs are named for their game but the files *inside* them are
+ * not: d1xr-opl3-music.dxa and d2xr-opl3-music.dxa both carry descent.sng,
+ * descent.ogg, briefing.ogg and game01..game04.ogg. Mounting both therefore
+ * leaves one game playing the other's music, and since PHYSFS_mount is given
+ * appendToPath 0, whichever was added last silently wins.
+ */
+static bool is_other_games_archive(const char *const filename)
+{
+#if DXX_BUILD_DESCENT == 1
+	static constexpr char other_prefix[]{"d2xr-"};
+#else
+	static constexpr char other_prefix[]{"d1xr-"};
+#endif
+
+	for (std::size_t i{}; i < sizeof(other_prefix) - 1; ++i)
+		if (std::tolower(static_cast<unsigned char>(filename[i])) != other_prefix[i])
+			return false;
+
+	return true;
+}
+
 static uint8_t add_archives_to_search_path()
 {
 	uint8_t content_updated{};
@@ -384,6 +411,12 @@ static uint8_t add_archives_to_search_path()
 		return content_updated;
 	for (const auto i : s)
 	{
+		if (is_other_games_archive(i))
+		{
+			con_printf(CON_DEBUG, "PHYSFS: Skipping %s, it belongs to the other game", i);
+			continue;
+		}
+
 		std::array<char, PATH_MAX> realfile;
 		if (PHYSFSX_getRealPath(i, realfile) && PHYSFS_mount(realfile.data(), nullptr, 0))
 		{
